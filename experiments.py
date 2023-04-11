@@ -296,10 +296,11 @@ for dataset_name in datasets:
             r_count = 0.0
             for index, row in r_box95.iterrows():
                 if index != explain_index:
-                    r_point = pd.DataFrame([train_bella.loc[index]])
-                    r_exp_box, r_exp_model, r_exp, r_new_fs = explain(train_bella, r_point, binary_features,
+                    r_point = pd.DataFrame([train.loc[index]])
+                    r_exp_box, r_exp_model, r_exp, r_new_fs = explain(train, train_dummy, r_point, binary_features,
                                                                       categorical_dis,
                                                                       numerical_features, index, verbose=False)
+
                     r_lime_explanation = lime_exp.explain_instance(X.loc[index].values, bb_model.predict,
                                                                    num_features=len(exp_model.feature_names_in_))
                     if r_exp_model:
