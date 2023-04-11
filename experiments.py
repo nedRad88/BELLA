@@ -253,6 +253,7 @@ for dataset_name in datasets:
         X_train_summary = shap.kmeans(train, 10)
     shap_exp = shap.KernelExplainer(bb_model.predict, X_train_summary)
     ##############
+    total_count = 0
 
     for explain_index in tqdm(explain_indexes):
         exp_point = pd.DataFrame([test.loc[explain_index]])
@@ -263,14 +264,17 @@ for dataset_name in datasets:
 
         exp_box, exp_model, exp = explain(train, train_dummy, exp_point, explain_point_dummy, binary_features,
                                                   categorical_dis, numerical_features, verbose=False)
-        bella_fidelity_total.append(
+        bella_results['accuracy'].append(
             mean_squared_error(exp_box['target'], exp_model.predict(exp_box[exp_model.feature_names_in_])))
-        # shap_explanation = shap_exp.shap_values(test_dummy.loc[explain_index].values, silent=True)
-        lime_explanation = lime_exp.explain_instance(test_dummy.loc[explain_index].values, bb_model.predict,
-                                                     num_features=len(exp_model.feature_names_in_))
-        # lime_explanation.save_to_file("lime12.html")
-        # plt_image = lime_explanation.as_pyplot_figure()
-        # plt_image.savefig('lime2.png')
+        if train_dummy:
+            shap_explanation = shap_exp.shap_values(test_dummy.loc[explain_index].values, silent=True)
+            lime_explanation = lime_exp.explain_instance(test_dummy.loc[explain_index].values, bb_model.predict,
+                                                         num_features=len(exp_model.feature_names_in_))
+        else:
+            shap_explanation = shap_exp.shap_values(test.loc[explain_index].values, silent=True)
+            lime_explanation = lime_exp.explain_instance(test.loc[explain_index].values, bb_model.predict,
+                                                         num_features=len(exp_model.feature_names_in_))
+
         features = [f_name for f_name in data.columns if f_name != 'target']
         exp_features = lime_explanation.domain_mapper.exp_feature_names
         exp_lime = lime_explanation.local_exp[0]
@@ -278,9 +282,10 @@ for dataset_name in datasets:
         expl = {}
         for item in exp_lime:
             expl[exp_features[item[0]]] = item[1]
-        l_exp_len.append(len(exp_model.feature_names_in_))
-        exp_acc.append((explain_point['target'].values[0] - lime_pred) ** 2)
-        # e = lime_explanation.as_list()
+        bella_results['length'].append(len(exp_model.feature_names_in_))
+        lime_results['length'].append(len(exp_model.feature_names_in_))
+        lime_results['accuracy'].append((exp_point['target'].values[0] - lime_pred) ** 2)
+        e = lime_explanation.as_list()
 
         explanation = []
         weights = []
@@ -309,15 +314,8 @@ for dataset_name in datasets:
                         r_count += 1.0
 
             if len(r_box95) >= 2:
-                robustness95.append(r / r_count)
-                robustness_lime.append(r_lime / r_count)
-                print("BELLA: ", robustness95)
-                print("LIME: ", robustness_lime)
-            total_count += 1
-        if total_count == 20:
-            print("BELLA: ", mean(robustness95), robustness95)
-            print("LIME: ", mean(robustness_lime), robustness_lime)
-            print("Length: ", mean(l_exp_len_bella), l_exp_len_bella)
+                bella_results['robustness'].append(r / r_count)
+                lime_results['robustness'].append(r_lime / r_count)
             total_count += 1
 
         for t in e:
@@ -332,39 +330,4 @@ for dataset_name in datasets:
                 conditions = conditions + " and " + new_value
         total = compute_confidence(X, conditions)
 
-        generality.append(total)
-
-        lime_fidelity_total.append(explain_predict(lime_model, exp_box))
-        shap_fidelity_total.append(explain_predict(shap_model, exp_box))
-
-        generality_bella.append(len(exp_box) - 1)
-        l_exp_len_bella.append(len(exp_model.feature_names_in_))
-
-        exp_acc_bella.append(
-            mean_squared_error(explain_point['target'], exp_model.predict(explain_point[exp_model.feature_names_in_])))
-        # print(len(exp_model.feature_names_in_))
-        # print(sqrt(mean(exp_acc_bella)))
-
-    print(dataset_name + " BELLA, rf, 95, general")
-    print("BB Model acc: ", bb_model_acc)
-    print("Exp acc: ", mean(exp_acc_bella), exp_acc_bella)
-    print("Generality: ", mean(generality_bella) / len(train), generality_bella)
-    print("Length: ", mean(l_exp_len_bella), l_exp_len_bella)
-    print("Robustness: ", mean(robustness95), robustness95)
-
-    print(dataset_name + " LIME, rf, 95, general")
-    print("BB Model acc: ", bb_model_acc)
-    print("Exp acc: ", mean(exp_acc), exp_acc)
-    # print("Generality: ", mean(generality)/len(train), generality)
-    print("Length: ", mean(l_exp_len), l_exp_len)
-    print("Robustness: ", mean(robustness_lime), robustness_lime)
-
-    output_file = open("lime_Bella_rf_results2_" + dataset_name + ".txt", 'a')
-    output_file.writelines("churn, nn, 95, general \nBB Model acc: {},\nMean Exp acc: {} \nExp acc: {} \n"
-                           "Mean Generality: {} \nGenerality: {} \nmean Length: {} \nLength: {} \n"
-                           .format(bb_model_acc, mean(exp_acc), exp_acc, mean(generality) / len(train), generality,
-                                   mean(l_exp_len),
-                                   l_exp_len))
-
-
-
+        bella_results['generality'].append(len(exp_box) - 1)
