@@ -13,7 +13,6 @@ from sklearn.exceptions import ConvergenceWarning
 from sklearn.metrics import mean_squared_error
 
 
-
 def discretize(data, cols, n_bins, labels=None):
     """
     Discretization by binning.
@@ -148,7 +147,7 @@ def train_lin_model(data, atts):
             new_atts.append(lmodel.feature_names_in_[i])
 
     if len(new_atts) == 0:
-        return 0.0, None, None, 0.0
+        return 0.0, None, 0.0
     lmodel = linear_model.LinearRegression()
     cv_splitter = KFold()
     predicted = cross_val_predict(lmodel, data[new_atts], data['target'], cv=cv_splitter)
@@ -262,7 +261,7 @@ def show_explanation(explanation, expl_model, data_point):
 
 def explain(train, train_dummy, explain_point, explain_point_dummy, bin_fs, cat_dist, num_fs, verbose=False):
     df = train.copy(deep=True)
-    if train_dummy:
+    if train_dummy is not None:
         data_dist = train_dummy.copy(deep=True)
     else:
         data_dist = df.copy(deep=True)
@@ -270,12 +269,12 @@ def explain(train, train_dummy, explain_point, explain_point_dummy, bin_fs, cat_
     e_index = explain_point.index[0]
     if e_index not in train.index:
         df = pd.concat([pd.DataFrame(explain_point), df])
-        if train_dummy:
+        if train_dummy is not None:
             data_dist = pd.concat([pd.DataFrame(explain_point_dummy), data_dist])
         else:
             df = pd.concat([pd.DataFrame(explain_point), df])
 
-    if cat_dist:
+    if cat_dist is not None:
         data_dist['distance_metric'] = compute_distances_cat(cat_dist, explain_point, df)
         if len(num_fs) > 0:
             data_dist['distance_metric'] += manhattan_distances(explain_point[num_fs + bin_fs],

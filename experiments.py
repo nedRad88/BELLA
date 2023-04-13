@@ -9,6 +9,8 @@ from sklearn.neural_network import MLPRegressor
 from datetime import datetime
 import sys
 import shap
+import warnings
+warnings.filterwarnings('ignore')
 
 
 classification = False
@@ -78,11 +80,19 @@ def compute_exp_distance(dict1, dict2, features):
         if v1 != 0.0 or v2 != 0.0:
             distance += abs(v2 - v1)/(abs(v1) + abs(v2))
 
-    return distance/len(features)
+    return 1 - distance/len(features)
+
+
+def compute_exp_distance_shap(l1, l2, num_of_features):
+    distance = 0.0
+    for i in range(len(l1)):
+        if l1[i] != 0.0 or l2[i] != 0.0:
+            distance += abs(l2[i] - l1[i]) / (abs(l1[i]) + abs(l2[i]))
+    return 1 - distance/num_of_features
 
 
 for dataset_name in datasets:
-    data = pd.read_csv("./datasets/regression/" + dataset_name + ".csv", header=0)
+    data = pd.read_csv("./datasets/" + dataset_name + ".csv", header=0)
     eps = 0.05
     bella_results = {'accuracy': [], 'length': [], 'generality': [], 'robustness': []}
     lime_results = {'accuracy': [], 'length': [], 'generality': [], 'robustness': []}
@@ -110,7 +120,7 @@ for dataset_name in datasets:
                 categorical_features.append(f)
         categorical_dis = compute_categorical_distances(data, categorical_features, numerical_features)
 
-    if dataset_name == 'bike':
+    elif dataset_name == 'bike':
         binary_features = ['Holiday', 'Functioning_day']
         categorical_features = ['Seasons']
         numerical_features = []
@@ -120,7 +130,7 @@ for dataset_name in datasets:
 
         categorical_dis = compute_categorical_distances(data, categorical_features, numerical_features)
 
-    if dataset_name == 'auto':
+    elif dataset_name == 'auto':
         binary_features = []
         categorical_features = ['origin']
         numerical_features = []
@@ -130,7 +140,7 @@ for dataset_name in datasets:
 
         categorical_dis = compute_categorical_distances(data, categorical_features, numerical_features)
 
-    if dataset_name == 'echo':
+    elif dataset_name == 'echo':
         binary_features = ['still_alive', 'pericardial', 'alive_at_1']
         categorical_features = []
         numerical_features = []
@@ -138,7 +148,7 @@ for dataset_name in datasets:
             if f not in binary_features and f not in categorical_features:
                 numerical_features.append(f)
 
-    if dataset_name == 'customer_churn':
+    elif dataset_name == 'customer_churn':
         binary_features = ["contract", "active", "complains"]
         categorical_features = []
         numerical_features = []
@@ -170,6 +180,7 @@ for dataset_name in datasets:
     Y = train['target']
     X = train.drop('target', axis=1)
     y_test = test['target']
+    train = train.drop('target', axis=1)
     test = test.drop('target', axis=1)
     if len(categorical_features) > 0:
         train_dummy = pd.get_dummies(data=X, columns=categorical_features)
@@ -180,23 +191,26 @@ for dataset_name in datasets:
     bb_model = RandomForestRegressor(n_estimators=1000)
     # bb_model = MLPRegressor(hidden_layer_sizes=(500,), max_iter=4000, learning_rate_init=0.005,
     #                        learning_rate='adaptive', batch_size=128)
-    if train_dummy:
+    if train_dummy is not None:
         bb_model.fit(train_dummy, Y)
         y_bb = bb_model.predict(train_dummy)
+        X_train_summary = shap.kmeans(train_dummy, 10)  # Train dataset summary for SHAP
         train_dummy['target'] = y_bb
-        test['target'] = bb_model.predict(test_dummy[dummy_features])
         bb_model_acc = mean_squared_error(y_test, bb_model.predict(test_dummy[dummy_features]))
+        ytest_bb = bb_model.predict(test_dummy[dummy_features])
+        test_dummy['target'] = ytest_bb
     else:
         bb_model.fit(train, Y)
         y_bb = bb_model.predict(train)
+        X_train_summary = shap.kmeans(train, 10)  # Train dataset summary for SHAP
         train['target'] = y_bb
-        test['target'] = bb_model.predict(test)
-        bb_model_acc = mean_squared_error(y_test, bb_model.predict(bb_model.predict(test)))
+        bb_model_acc = mean_squared_error(y_test, bb_model.predict(test))
+        ytest_bb = bb_model.predict(test)
 
-    train.drop('target', axis=1)
+    test['target'] = ytest_bb
     train['target'] = y_bb
 
-    if train_dummy:
+    if train_dummy is not None:
         for c in train_dummy.columns:
             if c != 'target':
                 if c not in test_dummy.columns:
@@ -213,14 +227,16 @@ for dataset_name in datasets:
     feature_names = []
     old_column_names = []
     lime_categorical_features = []
-    if train_dummy:
+    if train_dummy is not None:
         for col in train_dummy.columns:
-            feature_names.append(col)
-            old_column_names.append(col)
+            if col != 'target':
+                feature_names.append(col)
+                old_column_names.append(col)
     else:
         for col in train.columns:
-            feature_names.append(col)
-            old_column_names.append(col)
+            if col != 'target':
+                feature_names.append(col)
+                old_column_names.append(col)
 
     new_column_names_dict = {}
     new_column_names = []
@@ -234,23 +250,23 @@ for dataset_name in datasets:
             lime_categorical_features.append(attributes[i])
         i += 1
 
-    if train_dummy:
-        lime_exp = lime_tabular.LimeTabularExplainer(train.values, feature_names=new_column_names,
+    if train_dummy is not None:
+        train_lime = train_dummy.copy(deep=True)
+        train_lime.columns = new_column_names + ['target']
+        lime_exp = lime_tabular.LimeTabularExplainer(train_dummy[feature_names].values, feature_names=new_column_names,
                                                      class_names=['target'],
                                                      categorical_features=lime_categorical_features, verbose=False,
                                                      mode='regression')
     else:
-        lime_exp = lime_tabular.LimeTabularExplainer(train_dummy.values, feature_names=new_column_names,
+        train_lime = train.copy(deep=True)
+        train_lime.columns = new_column_names + ['target']
+        lime_exp = lime_tabular.LimeTabularExplainer(train[feature_names].values, feature_names=new_column_names,
                                                      class_names=['target'],
                                                      categorical_features=lime_categorical_features, verbose=False,
                                                      mode='regression')
     ##############
 
     # Setup for SHAP
-    if train_dummy:
-        X_train_summary = shap.kmeans(train_dummy, 10)
-    else:
-        X_train_summary = shap.kmeans(train, 10)
     shap_exp = shap.KernelExplainer(bb_model.predict, X_train_summary)
     ##############
     total_count = 0
@@ -258,21 +274,27 @@ for dataset_name in datasets:
     for explain_index in tqdm(explain_indexes):
         exp_point = pd.DataFrame([test.loc[explain_index]])
         explain_point_dummy = None
-        if train_dummy:
+        if train_dummy is not None:
             explain_point_dummy = pd.DataFrame([test_dummy.loc[explain_index]])
         features = [f_name for f_name in data.columns if f_name != 'target']
 
         exp_box, exp_model, exp = explain(train, train_dummy, exp_point, explain_point_dummy, binary_features,
                                           categorical_dis, numerical_features, verbose=False)
-        bella_results['accuracy'].append(
-            mean_squared_error(exp_box['target'], exp_model.predict(exp_box[exp_model.feature_names_in_])))
-        if train_dummy:
-            shap_explanation = shap_exp.shap_values(test_dummy.loc[explain_index].values, silent=True)
-            lime_explanation = lime_exp.explain_instance(test_dummy.loc[explain_index].values, bb_model.predict,
+        if train_dummy is not None:
+            bella_results['accuracy'].append((sqrt((explain_point_dummy['target'].values[0] -
+                                         exp_model.predict(explain_point_dummy[exp_model.feature_names_in_])[0])**2)))
+        else:
+            bella_results['accuracy'].append(
+                (sqrt((exp_point['target'].values[0] -
+                                         exp_model.predict(explain_point_dummy[exp_model.feature_names_in_])[0]) ** 2)))
+
+        if train_dummy is not None:
+            shap_explanation = shap_exp.shap_values(explain_point_dummy[feature_names], silent=True)
+            lime_explanation = lime_exp.explain_instance(test_dummy[feature_names].loc[explain_index].values, bb_model.predict,
                                                          num_features=len(exp_model.feature_names_in_))
         else:
-            shap_explanation = shap_exp.shap_values(test.loc[explain_index].values, silent=True)
-            lime_explanation = lime_exp.explain_instance(test.loc[explain_index].values, bb_model.predict,
+            shap_explanation = shap_exp.shap_values(exp_point[feature_names], silent=True)
+            lime_explanation = lime_exp.explain_instance(test[feature_names].loc[explain_index].values, bb_model.predict,
                                                          num_features=len(exp_model.feature_names_in_))
 
         features = [f_name for f_name in data.columns if f_name != 'target']
@@ -284,7 +306,7 @@ for dataset_name in datasets:
             expl[exp_features[item[0]]] = item[1]
         bella_results['length'].append(len(exp_model.feature_names_in_))
         lime_results['length'].append(len(exp_model.feature_names_in_))
-        lime_results['accuracy'].append((exp_point['target'].values[0] - lime_pred) ** 2)
+        lime_results['accuracy'].append(sqrt((exp_point['target'].values[0] - lime_pred) ** 2))
         shap_results['accuracy'].append(0.0)
         e = lime_explanation.as_list()
         shap_length = 0
@@ -302,20 +324,24 @@ for dataset_name in datasets:
             r_count = 0.0
             r_shap = 0.0
             for index, row in r_box95.iterrows():
+                r_point_dummy = None
                 if index != explain_index:
                     r_point = pd.DataFrame([train.loc[index]])
-                    r_exp_box, r_exp_model, r_exp = explain(train, train_dummy, r_point, binary_features,
-                                                            categorical_dis, numerical_features, index, verbose=False)
+                    if train_dummy is not None:
+                        r_point_dummy = pd.DataFrame([train_dummy.loc[index]])
 
-                    if train_dummy:
-                        r_lime_explanation = lime_exp.explain_instance(X.loc[index].values, bb_model.predict,
+                    r_exp_box, r_exp_model, r_exp = explain(train, train_dummy, r_point, r_point_dummy, binary_features,
+                                                            categorical_dis, numerical_features, verbose=False)
+
+                    if train_dummy is not None:
+                        r_lime_explanation = lime_exp.explain_instance(train_dummy[feature_names].loc[index].values, bb_model.predict,
                                                                        num_features=len(exp_model.feature_names_in_))
-                        r_shap_explanation = shap_exp.shap_values(r_point, silent=True)
+                        r_shap_explanation = shap_exp.shap_values(r_point_dummy[feature_names], silent=True)
 
                     else:
-                        r_lime_explanation = lime_exp.explain_instance(X.loc[index].values, bb_model.predict,
+                        r_lime_explanation = lime_exp.explain_instance(train[feature_names].loc[index].values, bb_model.predict,
                                                                        num_features=len(exp_model.feature_names_in_))
-                        r_shap_explanation = shap_exp.shap_values(r_point, silent=True)
+                        r_shap_explanation = shap_exp.shap_values(r_point[feature_names], silent=True)
 
                     if r_exp_model:
                         r_exp_features = r_lime_explanation.domain_mapper.exp_feature_names
@@ -323,10 +349,9 @@ for dataset_name in datasets:
                         r_expl = {}
                         for item in r_exp_lime:
                             r_expl[r_exp_features[item[0]]] = item[1]
-
-                        r_lime += compute_exp_distance(expl, r_expl, features=features)
-                        r += compute_exp_distance(exp, r_exp, features=features)
-                        r_shap += compute_exp_distance(shap_explanation[0], r_shap_explanation[0])
+                        r_lime += compute_exp_distance(expl, r_expl, features=new_column_names)
+                        r += compute_exp_distance(exp, r_exp, features=feature_names)
+                        r_shap += compute_exp_distance_shap(shap_explanation[0], r_shap_explanation[0], len(feature_names))
                         r_count += 1.0
 
             if len(r_box95) >= 2:
@@ -345,7 +370,13 @@ for dataset_name in datasets:
                 conditions = new_value
             else:
                 conditions = conditions + " and " + new_value
-        total = compute_confidence(X, conditions)
 
+        total = compute_confidence(train_lime, conditions)
         bella_results['generality'].append(len(exp_box) - 1)
-        shap_results['generality'].append(0)
+        shap_results['generality'].append(0.0)
+        lime_results['generality'].append(total)
+
+    print("Black box - RF, dataset: {}".format(dataset_name))
+    print("BELLA: ", bella_results)
+    print("LIME: ", lime_results)
+    print("SHAP:", shap_results)
