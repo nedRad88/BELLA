@@ -263,7 +263,7 @@ for dataset_name in datasets:
         features = [f_name for f_name in data.columns if f_name != 'target']
 
         exp_box, exp_model, exp = explain(train, train_dummy, exp_point, explain_point_dummy, binary_features,
-                                                  categorical_dis, numerical_features, verbose=False)
+                                          categorical_dis, numerical_features, verbose=False)
         bella_results['accuracy'].append(
             mean_squared_error(exp_box['target'], exp_model.predict(exp_box[exp_model.feature_names_in_])))
         if train_dummy:
@@ -285,8 +285,14 @@ for dataset_name in datasets:
         bella_results['length'].append(len(exp_model.feature_names_in_))
         lime_results['length'].append(len(exp_model.feature_names_in_))
         lime_results['accuracy'].append((exp_point['target'].values[0] - lime_pred) ** 2)
+        shap_results['accuracy'].append(0.0)
         e = lime_explanation.as_list()
+        shap_length = 0
+        for item in shap_explanation[0]:
+            if item != 0.0:
+                shap_length += 1
 
+        shap_results['length'].append(shap_length)
         explanation = []
         weights = []
         if total_count < 20:
@@ -294,15 +300,23 @@ for dataset_name in datasets:
             r = 0.0
             r_lime = 0.0
             r_count = 0.0
+            r_shap = 0.0
             for index, row in r_box95.iterrows():
                 if index != explain_index:
                     r_point = pd.DataFrame([train.loc[index]])
-                    r_exp_box, r_exp_model, r_exp, r_new_fs = explain(train, train_dummy, r_point, binary_features,
-                                                                      categorical_dis,
-                                                                      numerical_features, index, verbose=False)
+                    r_exp_box, r_exp_model, r_exp = explain(train, train_dummy, r_point, binary_features,
+                                                            categorical_dis, numerical_features, index, verbose=False)
 
-                    r_lime_explanation = lime_exp.explain_instance(X.loc[index].values, bb_model.predict,
-                                                                   num_features=len(exp_model.feature_names_in_))
+                    if train_dummy:
+                        r_lime_explanation = lime_exp.explain_instance(X.loc[index].values, bb_model.predict,
+                                                                       num_features=len(exp_model.feature_names_in_))
+                        r_shap_explanation = shap_exp.shap_values(r_point, silent=True)
+
+                    else:
+                        r_lime_explanation = lime_exp.explain_instance(X.loc[index].values, bb_model.predict,
+                                                                       num_features=len(exp_model.feature_names_in_))
+                        r_shap_explanation = shap_exp.shap_values(r_point, silent=True)
+
                     if r_exp_model:
                         r_exp_features = r_lime_explanation.domain_mapper.exp_feature_names
                         r_exp_lime = r_lime_explanation.local_exp[0]
@@ -312,11 +326,13 @@ for dataset_name in datasets:
 
                         r_lime += compute_exp_distance(expl, r_expl, features=features)
                         r += compute_exp_distance(exp, r_exp, features=features)
+                        r_shap += compute_exp_distance(shap_explanation[0], r_shap_explanation[0])
                         r_count += 1.0
 
             if len(r_box95) >= 2:
                 bella_results['robustness'].append(r / r_count)
                 lime_results['robustness'].append(r_lime / r_count)
+                shap_results['robustness'].append(r_shap/r_count)
             total_count += 1
 
         for t in e:
@@ -332,3 +348,4 @@ for dataset_name in datasets:
         total = compute_confidence(X, conditions)
 
         bella_results['generality'].append(len(exp_box) - 1)
+        shap_results['generality'].append(0)
