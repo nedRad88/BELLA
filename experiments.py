@@ -6,8 +6,6 @@ from tqdm import tqdm
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.neural_network import MLPRegressor
-from datetime import datetime
-import sys
 import shap
 import warnings
 warnings.filterwarnings('ignore')
@@ -51,11 +49,11 @@ def to_code(string):
     code = re.sub("[a-z]+", lambda m: "d['%s']" % m.group(0), code)
     try:
         code = re.sub("<(d['[a-z]+'])<=", lambda m: "<%s and %s<=" % (m.group(1), m.group(1)), code)
-    except:
+    except re.error:
         pass
     try:
         code = re.sub("(d['[a-z]+'])=", lambda m: "%s==" % m.group(1), code)
-    except:
+    except re.error:
         pass
     # code = re.sub("\b(?!and)\b\S+", lambda m: "d['%s']" % m.group(0), code)
     code = code.replace(",", ") and (")
@@ -282,19 +280,22 @@ for dataset_name in datasets:
                                           categorical_dis, numerical_features, verbose=False)
         if train_dummy is not None:
             bella_results['accuracy'].append((sqrt((explain_point_dummy['target'].values[0] -
-                                         exp_model.predict(explain_point_dummy[exp_model.feature_names_in_])[0])**2)))
+                                                    exp_model.predict(
+                                                        explain_point_dummy[exp_model.feature_names_in_])[0])**2)))
         else:
             bella_results['accuracy'].append(
                 (sqrt((exp_point['target'].values[0] -
-                                         exp_model.predict(explain_point_dummy[exp_model.feature_names_in_])[0]) ** 2)))
+                       exp_model.predict(explain_point_dummy[exp_model.feature_names_in_])[0]) ** 2)))
 
         if train_dummy is not None:
             shap_explanation = shap_exp.shap_values(explain_point_dummy[feature_names], silent=True)
-            lime_explanation = lime_exp.explain_instance(test_dummy[feature_names].loc[explain_index].values, bb_model.predict,
+            lime_explanation = lime_exp.explain_instance(test_dummy[feature_names].loc[explain_index].values,
+                                                         bb_model.predict,
                                                          num_features=len(exp_model.feature_names_in_))
         else:
             shap_explanation = shap_exp.shap_values(exp_point[feature_names], silent=True)
-            lime_explanation = lime_exp.explain_instance(test[feature_names].loc[explain_index].values, bb_model.predict,
+            lime_explanation = lime_exp.explain_instance(test[feature_names].loc[explain_index].values,
+                                                         bb_model.predict,
                                                          num_features=len(exp_model.feature_names_in_))
 
         features = [f_name for f_name in data.columns if f_name != 'target']
@@ -334,12 +335,14 @@ for dataset_name in datasets:
                                                             categorical_dis, numerical_features, verbose=False)
 
                     if train_dummy is not None:
-                        r_lime_explanation = lime_exp.explain_instance(train_dummy[feature_names].loc[index].values, bb_model.predict,
+                        r_lime_explanation = lime_exp.explain_instance(train_dummy[feature_names].loc[index].values,
+                                                                       bb_model.predict,
                                                                        num_features=len(exp_model.feature_names_in_))
                         r_shap_explanation = shap_exp.shap_values(r_point_dummy[feature_names], silent=True)
 
                     else:
-                        r_lime_explanation = lime_exp.explain_instance(train[feature_names].loc[index].values, bb_model.predict,
+                        r_lime_explanation = lime_exp.explain_instance(train[feature_names].loc[index].values,
+                                                                       bb_model.predict,
                                                                        num_features=len(exp_model.feature_names_in_))
                         r_shap_explanation = shap_exp.shap_values(r_point[feature_names], silent=True)
 
@@ -351,7 +354,8 @@ for dataset_name in datasets:
                             r_expl[r_exp_features[item[0]]] = item[1]
                         r_lime += compute_exp_distance(expl, r_expl, features=new_column_names)
                         r += compute_exp_distance(exp, r_exp, features=feature_names)
-                        r_shap += compute_exp_distance_shap(shap_explanation[0], r_shap_explanation[0], len(feature_names))
+                        r_shap += compute_exp_distance_shap(shap_explanation[0], r_shap_explanation[0],
+                                                            len(feature_names))
                         r_count += 1.0
 
             if len(r_box95) >= 2:
