@@ -1,21 +1,11 @@
-from statistics import mean
-from math import sqrt
-import itertools
-import matplotlib.pyplot as plt
-import pandas as pd
-from sklearn.model_selection import train_test_split, cross_val_predict, KFold
+from sklearn.model_selection import train_test_split
 from tqdm import tqdm
-from sklearn import linear_model
-import numpy as np
 import scipy.stats
-from sklearn.utils._testing import ignore_warnings
-from sklearn.exceptions import ConvergenceWarning
-from sklearn.metrics import mean_squared_error
-from sklearn.metrics.pairwise import manhattan_distances
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.neural_network import MLPRegressor
 import sys
+from bella import *
+
 
 dataset_name = sys.argv[1]
 classification = False
@@ -107,155 +97,6 @@ def compute_distances_cat(dict_of_dist, point, train_set):
     return cat_distance
 
 
-def calculate_vif(df, atts):
-    stop = False
-    atts2 = [item for item in atts]
-    df = df.drop('target', axis=1)
-    while len(atts2) > 1 and stop is False:
-        max_vif = 0.0
-        worst_feature = None
-        for feature in atts2:
-            X = [f for f in atts2 if f != feature]
-            X, y = df[X], df[feature]  # extract r-squared from the fit
-            r2 = linear_model.LinearRegression().fit(X, y).score(X, y)
-            if r2 == 1:
-                vif = 100.0
-            else:
-                vif = 1 / (1 - r2)  # return VIF DataFrame
-            if vif >= max_vif:
-                max_vif = vif
-                worst_feature = feature
-        if max_vif >= 10.0:
-            atts2.remove(worst_feature)
-            stop = False
-        else:
-            stop = True
-
-    return atts2
-
-
-def compute_stats(values):
-    return mean(values), np.var(values)
-
-
-def margin_of_error(true_values, predicted):
-    delta_values = np.square(np.subtract(predicted, true_values))
-    all_mu = np.square(predicted[None, :] - true_values[:, None])
-    mu_values = all_mu.mean(axis=1)
-
-    delta_mean, delta_var = compute_stats(delta_values)
-    mu_mean = mean(mu_values)
-
-    moe_delta95 = scipy.stats.t.ppf(q=1 - .05 / 2, df=len(true_values) - 1) * sqrt(delta_var) / sqrt(len(true_values))
-
-    return 1 - min(1, (abs(delta_mean + moe_delta95)) / (abs(mu_mean)))
-
-
-@ignore_warnings(category=ConvergenceWarning)
-def train_lin_model(data, atts):
-    new_atts = calculate_vif(data, atts=atts)
-    lmodel = linear_model.LassoCV(cv=5, random_state=1)
-    lmodel.fit(data[new_atts], data['target'])
-    alpha_i = lmodel.alphas_.tolist().index(lmodel.alpha_)
-    mses = lmodel.mse_path_[alpha_i]
-    ste = sqrt(np.var(mses)) / sqrt(len(mses))
-    best_alpha = lmodel.alpha_
-    max_mse = np.mean(mses) + ste
-    for i in range(len(lmodel.alphas_)):
-        if np.mean(lmodel.mse_path_[i]) < max_mse:
-            best_alpha = lmodel.alphas_[i]
-            break
-    lmodel = linear_model.Lasso(alpha=best_alpha)
-    lmodel.fit(data[new_atts], data['target'])
-    new_atts = []
-    for i in range(len(lmodel.coef_)):
-        if lmodel.coef_[i] != 0.0:
-            new_atts.append(lmodel.feature_names_in_[i])
-
-    if len(new_atts) == 0:
-        return 0.0, None, None, 0.0
-    lmodel = linear_model.LinearRegression()
-    cv_splitter = KFold()
-    predicted = cross_val_predict(lmodel, data[new_atts], data['target'], cv=cv_splitter)
-    lmodel = linear_model.LinearRegression()
-    lmodel.fit(data[new_atts], data['target'])
-    lb95 = margin_of_error(data['target'].values, predicted)
-    mse = mean_squared_error(data['target'].tolist(), lmodel.predict(data[new_atts]))
-    return lb95, lmodel, new_atts, mse
-
-
-def show_explanation(explanation, offset):
-    exp_features = list(explanation.keys())
-    importance = list(explanation.values())
-    x_pos = np.arange(len(exp_features))
-    colors = ['b'] * len(importance)
-    for i in range(len(importance)):
-        if importance[i] < 0.0:
-            colors[i] = 'r'
-    plt.bar(x_pos, importance, align='center', color=colors, bottom=offset)
-    plt.xticks(x_pos, exp_features, rotation=45)
-    plt.ylabel('Feature contribution')
-    plt.show()
-
-
-def explain(train, train_dummy, explain_point, explain_point_dummy, bin_fs, cat_dist, num_fs, verbose=False):
-    global lower_bound, predict_error
-    df = train.copy(deep=True)
-    data_dist = train_dummy.copy(deep=True)
-    e_index = explain_point.index[0]
-    if e_index not in train.index:
-        df = pd.concat([pd.DataFrame(explain_point), df])
-        data_dist = pd.concat([pd.DataFrame(explain_point_dummy), data_dist])
-
-    data_dist['distance_metric'] = compute_distances_cat(cat_dist, explain_point, df)
-    if dataset_name != 'servo':
-        data_dist['distance_metric'] += manhattan_distances(explain_point[num_fs + bin_fs], data_dist[num_fs + bin_fs])[0]
-    # Sort by target diff and distance_metric
-    data_dist = data_dist.sort_values(['distance_metric'], ascending=[True])
-    # data_dist['target'] = df['target']
-    data_dist = data_dist.drop('distance_metric', axis=1)
-    fs = [c for c in data_dist.columns if c != 'target']
-    outside_box = data_dist.copy(deep=True)
-    best_f1 = 0.0
-    explain_box = 0
-    best_model = None
-    inside_box = pd.DataFrame([data_dist.loc[explain_point.index[0]]])
-    outside_box = outside_box.drop([explain_point.index[0]])
-    data_dist = data_dist.drop([explain_point.index[0]])
-    best_vars = None
-    new_vars = None
-    for i, g in data_dist.groupby(np.arange(len(data_dist)) // (round(len(data_dist) / 100))):
-        inside_box = pd.concat([inside_box, g])
-        outside_box = outside_box.drop(list(g.index))
-        if len(inside_box) >= max(10, 2 * len(fs)):
-            f95, model, new_vars, me = train_lin_model(inside_box, fs)
-            if len(inside_box) not in lower_bound90.keys():
-                lower_bound90[len(inside_box)] = {}
-                lower_bound90[len(inside_box)]['bound_sum'] = f95
-                lower_bound90[len(inside_box)]['n_app'] = 1
-            else:
-                lower_bound90[len(inside_box)]['bound_sum'] += f95
-                lower_bound90[len(inside_box)]['n_app'] += 1
-        else:
-            model = None
-            f95 = 0.0
-        if f95 > best_f1:
-            best_f1 = f95
-            best_model = model
-            best_vars = new_vars
-            explain_box = inside_box.copy(deep=True)
-    explanation = {}
-    e_point = df.loc[e_index]
-    if best_model:
-        for i in range(len(best_model.feature_names_in_)):
-            if abs(best_model.coef_[i]) > 0.0:
-                explanation[best_model.feature_names_in_[i]] = best_model.coef_[i]
-        explanation = dict(sorted(explanation.items(), key=lambda x: abs(x[1]), reverse=True))
-
-    if verbose:
-        show_explanation(explanation, best_model.intercept_)
-
-    return explain_box, best_model, explanation, best_vars
 
 
 data = pd.read_csv("./datasets/regression/" + dataset_name + ".csv", header=0)
@@ -301,7 +142,7 @@ if dataset_name != 'servo':
     test_num = standardizer.transform(test_num.values)
     train[numerical_features] = train_num
     test[numerical_features] = test_num
-explain_indexes = explain_indexes[:20]
+explain_indexes = test[:20]
 
 bb_model = RandomForestRegressor(n_estimators=1000)
 # bb_model = MLPRegressor(hidden_layer_sizes=(500,), max_iter=4000, learning_rate_init=0.005, learning_rate='adaptive', batch_size=256)
