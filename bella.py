@@ -259,64 +259,149 @@ def show_explanation(explanation, expl_model, data_point):
     plt.close()
 
 
-def explain(train, train_dummy, explain_point, explain_point_dummy, bin_fs, cat_dist, num_fs, verbose=False):
-    df = train.copy(deep=True)
-    if train_dummy is not None:
-        data_dist = train_dummy.copy(deep=True)
-    else:
-        data_dist = df.copy(deep=True)
+def counterfactual_explanation(train_data, train_data_dummy, exp_point, exp_point_dummy, binary_features,
+                               categorical_dis, numerical_features, ref_target, eps):
+    stop = False
+    while not stop:
+        potential_refs = train_data[(ref_target - ref_target * eps <= train_data['target']) &
+                                    (train_data['target'] <= ref_target + eps * ref_target)]
+        if len(potential_refs) == 0:
+            eps += 0.05
+            stop = False
+        else:
+            stop = True
 
-    e_index = explain_point.index[0]
-    if e_index not in train.index:
-        df = pd.concat([pd.DataFrame(explain_point), df])
+    top_k_potential = {}
+    for index, row in potential_refs.iterrows():
+        candidate = pd.DataFrame([train_data.loc[index]])
+        dist = compute_distances_cat(categorical_dis, exp_point, candidate).values[0]
+        if train_data_dummy is None:
+            dist += manhattan_distances(exp_point[numerical_features + binary_features],
+                                        candidate[numerical_features + binary_features])[0][0]
+        top_k_potential[index] = dist
+    top_k_potential = dict(sorted(top_k_potential.items(), key=lambda x: abs(x[1]), reverse=True)[:5])
+    potential_refs = potential_refs.loc[list(top_k_potential.keys())]
+    potential_refs_dummy = train_data_dummy.loc[list(top_k_potential.keys())]
+    ref_models = {}
+    dist3_min = 10000000000.0
+    exp_box_size = len(train_data)
+    best_counterfactual_index = None
+    ref_errors = {}
+
+    for ref_i, ref_row in potential_refs.iterrows():
+        exp_point_copy = exp_point_dummy.copy(deep=True)
+        ref_exp_point = pd.DataFrame([potential_refs.loc[ref_i]])
+        ref_exp_point_dummy = pd.DataFrame([train_data_dummy.loc[ref_i]])
+        exp_box, exp_model, exp = explain(train_data, train_data_dummy, ref_exp_point, ref_exp_point_dummy,
+                                          binary_features, categorical_dis, numerical_features, verbose=False)
+        ref_models[ref_i] = exp_model
+        if len(exp_model.feature_names_in_) > 1:
+            dist3 = compute_distances_cat(categorical_dis, ref_exp_point, exp_point).values[0]
+            if train_data_dummy is None:
+                dist3 += manhattan_distances([ref_row[numerical_features + binary_features]],
+                                             [exp_point[numerical_features+binary_features].squeeze()])[0][0]
+            dist3 += manhattan_distances(ref_exp_point_dummy[exp_model.feature_names_in_], exp_point_copy[exp_model.feature_names_in_]) / \
+                     len(exp_model.feature_names_in_)
+        else:
+            dist3 = compute_distances_cat(categorical_dis, ref_exp_point, exp_point).values[0]
+            if train_data_dummy is None:
+                dist3 += manhattan_distances([ref_row[numerical_features + binary_features]],
+                                             [exp_point[numerical_features + binary_features].squeeze()])[0][0]
+            dist3 += abs(ref_exp_point_dummy[exp_model.feature_names_in_].values - exp_point_copy[exp_model.feature_names_in_].values)
+
+        if dist3 <= dist3_min:
+            dist3_min = dist3
+            best_counterfactual_index = ref_i
+
+    exp_point_copy = exp_point_dummy.copy(deep=True)
+    if best_counterfactual_index and best_counterfactual_index in ref_models:
+        for feature in ref_models[best_counterfactual_index].feature_names_in_:
+            exp_point_copy.iloc[0][feature] = train_data_dummy.loc[best_counterfactual_index][feature]
+        error3['e'].append(
+            (potential_refs.loc[best_counterfactual_index]['target'] - bb_model.predict(exp_point_copy[dummy_features])[0]) ** 2)
+        error3['l'].append(len(ref_models[best_counterfactual_index].feature_names_in_))
+
+    exp_point_copy = exp_point.copy(deep=True)
+    for feature in ref_models[best_counterfactual_index].feature_names_in_:
+        exp_point_copy.iloc[0][feature] = potential_refs.loc[best_counterfactual_index][feature]
+    error3['e'].append((potential_refs.loc[best_counterfactual_index]['target'] - bb_model.predict(exp_point_copy[features])[0]) ** 2)
+    error3['l'].append(len(ref_models[best_counterfactual_index].feature_names_in_))
+
+    counter_explanation = {}
+    for f in features:
+        val = exp_point_original_copy[f].values[0] - exp_point_original[f].values[0]
+        if val != 0.0:
+            counter_explanation[f] = val
+    counter_explanation = dict(sorted(counter_explanation.items(), key=lambda x: abs(x[1]), reverse=True))
+
+    return counter_explanation
+
+
+def explain(train, train_dummy, explain_point, explain_point_dummy, bin_fs, cat_dist, num_fs, reference_value=None,
+            epsilon=0.05, verbose=False):
+    if reference_value:
+        return counterfactual_explanation(train, train_dummy, explain_point, explain_point_dummy, bin_fs, cat_dist,
+                                          num_fs, reference_value, epsilon)
+    else:
+        df = train.copy(deep=True)
         if train_dummy is not None:
-            data_dist = pd.concat([pd.DataFrame(explain_point_dummy), data_dist])
+            data_dist = train_dummy.copy(deep=True)
         else:
+            data_dist = df.copy(deep=True)
+
+        e_index = explain_point.index[0]
+        if e_index not in train.index:
             df = pd.concat([pd.DataFrame(explain_point), df])
+            if train_dummy is not None:
+                data_dist = pd.concat([pd.DataFrame(explain_point_dummy), data_dist])
+            else:
+                df = pd.concat([pd.DataFrame(explain_point), df])
 
-    if cat_dist is not None:
-        data_dist['distance_metric'] = compute_distances_cat(cat_dist, explain_point, df)
-        if len(num_fs) > 0:
-            data_dist['distance_metric'] += manhattan_distances(explain_point[num_fs + bin_fs],
-                                                                data_dist[num_fs + bin_fs])[0]
-    else:
-        data_dist['distance_metric'] = manhattan_distances(explain_point[num_fs + bin_fs],
-                                                           data_dist[num_fs + bin_fs])[0]
-    # Sort by target diff and distance_metric
-    data_dist = data_dist.sort_values(['distance_metric'], ascending=[True])
-    data_dist = data_dist.drop('distance_metric', axis=1)
-    fs = [c for c in data_dist.columns if c != 'target']
-    outside_box = data_dist.copy(deep=True)
-    inside_box = pd.DataFrame([data_dist.loc[explain_point.index[0]]])
-    outside_box = outside_box.drop([explain_point.index[0]])
-    data_dist = data_dist.drop([explain_point.index[0]])
-    # Initialization
-    best_lb = 0.0
-    explain_box = 0
-    best_model = None
-    # Optimal neighbourhood search
-    for i, g in data_dist.groupby(np.arange(len(data_dist)) // (round(len(data_dist) / 100))):
-        inside_box = pd.concat([inside_box, g])
-        outside_box = outside_box.drop(list(g.index))
-        if len(inside_box) >= max(10, 2 * len(fs)):
-            lb, model, me = train_lin_model(inside_box, fs)
+        if cat_dist is not None:
+            data_dist['distance_metric'] = compute_distances_cat(cat_dist, explain_point, df)
+            if len(num_fs) > 0:
+                data_dist['distance_metric'] += manhattan_distances(explain_point[num_fs + bin_fs],
+                                                                    data_dist[num_fs + bin_fs])[0]
         else:
-            model = None
-            lb = 0.0
-        if lb > best_lb:
-            best_lb = lb
-            best_model = model
-            explain_box = inside_box.copy(deep=True)
+            data_dist['distance_metric'] = manhattan_distances(explain_point[num_fs + bin_fs],
+                                                               data_dist[num_fs + bin_fs])[0]
+        # Sort by target diff and distance_metric
+        data_dist = data_dist.sort_values(['distance_metric'], ascending=[True])
+        data_dist = data_dist.drop('distance_metric', axis=1)
+        fs = [c for c in data_dist.columns if c != 'target']
+        outside_box = data_dist.copy(deep=True)
+        inside_box = pd.DataFrame([data_dist.loc[explain_point.index[0]]])
+        outside_box = outside_box.drop([explain_point.index[0]])
+        data_dist = data_dist.drop([explain_point.index[0]])
+        # Initialization
+        best_lb = 0.0
+        explain_box = 0
+        best_model = None
+        # Optimal neighbourhood search
+        for i, g in data_dist.groupby(np.arange(len(data_dist)) // (round(len(data_dist) / 100))):
+            inside_box = pd.concat([inside_box, g])
+            outside_box = outside_box.drop(list(g.index))
+            if len(inside_box) >= max(10, 2 * len(fs)):
+                lb, model, me = train_lin_model(inside_box, fs)
+            else:
+                model = None
+                lb = 0.0
+            if lb > best_lb:
+                best_lb = lb
+                best_model = model
+                explain_box = inside_box.copy(deep=True)
 
-    # Form and visualize explanation
-    explanation = {}
-    e_point = df.loc[e_index]
-    if best_model:
-        for i in range(len(best_model.feature_names_in_)):
-            if abs(best_model.coef_[i]) > 0.0:
-                explanation[best_model.feature_names_in_[i]] = best_model.coef_[i]
+        # Form and visualize explanation
+        explanation = {}
+        e_point = df.loc[e_index]
+        if best_model:
+            for i in range(len(best_model.feature_names_in_)):
+                if abs(best_model.coef_[i]) > 0.0:
+                    explanation[best_model.feature_names_in_[i]] = best_model.coef_[i]
 
-    if verbose:
-        show_explanation(explanation, best_model, e_point)
+        if verbose:
+            show_explanation(explanation, best_model, e_point)
 
-    return explain_box, best_model, explanation
+        return explain_box, best_model, explanation
+
+
