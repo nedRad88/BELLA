@@ -3,6 +3,7 @@ from tqdm import tqdm
 import scipy.stats
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.neural_network import MLPRegressor
 import sys
 from bella import *
 
@@ -145,7 +146,8 @@ if dataset_name != 'servo':
 explain_indexes = test[:20]
 
 bb_model = RandomForestRegressor(n_estimators=1000)
-# bb_model = MLPRegressor(hidden_layer_sizes=(500,), max_iter=4000, learning_rate_init=0.005, learning_rate='adaptive', batch_size=256)
+# bb_model = MLPRegressor(hidden_layer_sizes=(500,), max_iter=4000, learning_rate_init=0.005, learning_rate='adaptive',
+#                        batch_size=256)
 Y = train['target']
 X = train.drop('target', axis=1)
 X_dummy = pd.get_dummies(data=X, columns=categorical_features)
