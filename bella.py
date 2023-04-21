@@ -261,10 +261,17 @@ def show_explanation(explanation, expl_model, data_point):
 
 def counterfactual_explanation(train_data, train_data_dummy, exp_point, exp_point_dummy, binary_features,
                                categorical_dis, numerical_features, ref_target, eps):
+
     stop = False
     while not stop:
-        potential_refs = train_data[(ref_target - ref_target * eps <= train_data['target']) &
-                                    (train_data['target'] <= ref_target + eps * ref_target)]
+        if train_data_dummy is not None:
+            features = [f_name for f_name in train_data_dummy.columns if f_name != 'target']
+            potential_refs = train_data_dummy[(ref_target - ref_target * eps <= train_data_dummy['target']) &
+                                              (train_data_dummy['target'] <= ref_target + eps * ref_target)]
+        else:
+            features = [f_name for f_name in train_data.columns if f_name != 'target']
+            potential_refs = train_data[(ref_target - ref_target * eps <= train_data['target']) &
+                                        (train_data['target'] <= ref_target + eps * ref_target)]
         if len(potential_refs) == 0:
             eps += 0.05
             stop = False
@@ -274,67 +281,93 @@ def counterfactual_explanation(train_data, train_data_dummy, exp_point, exp_poin
     top_k_potential = {}
     for index, row in potential_refs.iterrows():
         candidate = pd.DataFrame([train_data.loc[index]])
-        dist = compute_distances_cat(categorical_dis, exp_point, candidate).values[0]
-        if train_data_dummy is None:
+        if categorical_dis is not None:
+            dist = compute_distances_cat(categorical_dis, exp_point, candidate).values[0]
             dist += manhattan_distances(exp_point[numerical_features + binary_features],
                                         candidate[numerical_features + binary_features])[0][0]
+        else:
+            dist = manhattan_distances(exp_point[numerical_features + binary_features],
+                                       candidate[numerical_features + binary_features])[0][0]
         top_k_potential[index] = dist
     top_k_potential = dict(sorted(top_k_potential.items(), key=lambda x: abs(x[1]), reverse=True)[:5])
-    potential_refs = potential_refs.loc[list(top_k_potential.keys())]
-    potential_refs_dummy = train_data_dummy.loc[list(top_k_potential.keys())]
+    if train_data_dummy is not None:
+        potential_refs = train_data_dummy.loc[list(top_k_potential.keys())]
+    else:
+        potential_refs = potential_refs.loc[list(top_k_potential.keys())]
+
     ref_models = {}
-    dist3_min = 10000000000.0
-    exp_box_size = len(train_data)
+    dist_counter_min = 10000000000.0
     best_counterfactual_index = None
-    ref_errors = {}
 
     for ref_i, ref_row in potential_refs.iterrows():
-        exp_point_copy = exp_point_dummy.copy(deep=True)
         ref_exp_point = pd.DataFrame([potential_refs.loc[ref_i]])
-        ref_exp_point_dummy = pd.DataFrame([train_data_dummy.loc[ref_i]])
+        if train_data_dummy is not None:
+            exp_point_copy = exp_point_dummy.copy(deep=True)
+            ref_exp_point_dummy = pd.DataFrame([train_data_dummy.loc[ref_i]])
+        else:
+            exp_point_copy = exp_point.copy(deep=True)
+            ref_exp_point_dummy = None
+
         exp_box, exp_model, exp = explain(train_data, train_data_dummy, ref_exp_point, ref_exp_point_dummy,
                                           binary_features, categorical_dis, numerical_features, verbose=False)
+        for feature in exp_model.feature_names_in_:
+            exp_point_copy.iloc[0][feature] = ref_exp_point[feature]
         ref_models[ref_i] = exp_model
         if len(exp_model.feature_names_in_) > 1:
-            dist3 = compute_distances_cat(categorical_dis, ref_exp_point, exp_point).values[0]
-            if train_data_dummy is None:
-                dist3 += manhattan_distances([ref_row[numerical_features + binary_features]],
-                                             [exp_point[numerical_features+binary_features].squeeze()])[0][0]
-            dist3 += manhattan_distances(ref_exp_point_dummy[exp_model.feature_names_in_], exp_point_copy[exp_model.feature_names_in_]) / \
-                     len(exp_model.feature_names_in_)
-        else:
-            dist3 = compute_distances_cat(categorical_dis, ref_exp_point, exp_point).values[0]
-            if train_data_dummy is None:
-                dist3 += manhattan_distances([ref_row[numerical_features + binary_features]],
-                                             [exp_point[numerical_features + binary_features].squeeze()])[0][0]
-            dist3 += abs(ref_exp_point_dummy[exp_model.feature_names_in_].values - exp_point_copy[exp_model.feature_names_in_].values)
+            if categorical_dis is not None:
+                dist_counter = compute_distances_cat(categorical_dis, ref_exp_point, exp_point).values[0]
+                dist_counter += manhattan_distances([ref_row[numerical_features + binary_features]],
+                                                    [exp_point[numerical_features+binary_features].squeeze()])[0][0]
+                dist_counter += manhattan_distances(ref_exp_point_dummy[exp_model.feature_names_in_],
+                                                    exp_point_copy[exp_model.feature_names_in_]) / \
+                                len(exp_model.feature_names_in_)
+            else:
+                dist_counter = manhattan_distances([ref_row[numerical_features + binary_features]],
+                                                    [exp_point[numerical_features + binary_features].squeeze()])[0][0]
+                dist_counter += manhattan_distances(ref_exp_point[exp_model.feature_names_in_],
+                                                    exp_point_copy[exp_model.feature_names_in_]) / \
+                                len(exp_model.feature_names_in_)
 
-        if dist3 <= dist3_min:
-            dist3_min = dist3
+        else:
+            if categorical_dis is not None:
+                dist_counter = compute_distances_cat(categorical_dis, ref_exp_point, exp_point).values[0]
+                dist_counter += manhattan_distances([ref_row[numerical_features + binary_features]],
+                                             [exp_point[numerical_features + binary_features].squeeze()])[0][0]
+                dist_counter += abs(ref_exp_point_dummy[exp_model.feature_names_in_].values -
+                                    exp_point_copy[exp_model.feature_names_in_].values)
+            else:
+                dist_counter = manhattan_distances([ref_row[numerical_features + binary_features]],
+                                                    [exp_point[numerical_features + binary_features].squeeze()])[0][0]
+                dist_counter += abs(ref_exp_point[exp_model.feature_names_in_].values -
+                                    exp_point_copy[exp_model.feature_names_in_].values)
+
+        if dist_counter <= dist_counter_min:
+            dist_counter_min = dist_counter
             best_counterfactual_index = ref_i
 
-    exp_point_copy = exp_point_dummy.copy(deep=True)
-    if best_counterfactual_index and best_counterfactual_index in ref_models:
+    if train_data_dummy is not None:
+        exp_point_copy = exp_point_dummy.copy(deep=True)
         for feature in ref_models[best_counterfactual_index].feature_names_in_:
             exp_point_copy.iloc[0][feature] = train_data_dummy.loc[best_counterfactual_index][feature]
-        error3['e'].append(
-            (potential_refs.loc[best_counterfactual_index]['target'] - bb_model.predict(exp_point_copy[dummy_features])[0]) ** 2)
-        error3['l'].append(len(ref_models[best_counterfactual_index].feature_names_in_))
-
-    exp_point_copy = exp_point.copy(deep=True)
-    for feature in ref_models[best_counterfactual_index].feature_names_in_:
-        exp_point_copy.iloc[0][feature] = potential_refs.loc[best_counterfactual_index][feature]
-    error3['e'].append((potential_refs.loc[best_counterfactual_index]['target'] - bb_model.predict(exp_point_copy[features])[0]) ** 2)
-    error3['l'].append(len(ref_models[best_counterfactual_index].feature_names_in_))
+        error = (potential_refs.loc[best_counterfactual_index]['target'] -
+                     bb_model.predict(exp_point_copy[features])[0]) ** 2
+        length_of_counterfactual = (len(ref_models[best_counterfactual_index].feature_names_in_))
+    else:
+        exp_point_copy = exp_point.copy(deep=True)
+        for feature in ref_models[best_counterfactual_index].feature_names_in_:
+            exp_point_copy.iloc[0][feature] = potential_refs.loc[best_counterfactual_index][feature]
+        error = (potential_refs.loc[best_counterfactual_index]['target'] -
+                 bb_model.predict(exp_point_copy[features])[0]) ** 2
+        length_of_counterfactual = len(ref_models[best_counterfactual_index].feature_names_in_)
 
     counter_explanation = {}
     for f in features:
-        val = exp_point_original_copy[f].values[0] - exp_point_original[f].values[0]
+        val = exp_point_copy[f].values[0] - exp_point[f].values[0]
         if val != 0.0:
             counter_explanation[f] = val
     counter_explanation = dict(sorted(counter_explanation.items(), key=lambda x: abs(x[1]), reverse=True))
 
-    return counter_explanation
+    return counter_explanation, error, length_of_counterfactual
 
 
 def explain(train, train_dummy, explain_point, explain_point_dummy, bin_fs, cat_dist, num_fs, reference_value=None,
