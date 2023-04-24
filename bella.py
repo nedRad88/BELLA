@@ -31,7 +31,7 @@ def discretize(data, cols, n_bins, labels=None):
 
 def compute_categorical_distances(data_train, categorical_features, num_features):
     """
-
+    Computing distance for categorical features.
     :param data_train:
     :param categorical_features:
     :param num_features:
@@ -63,6 +63,13 @@ def compute_categorical_distances(data_train, categorical_features, num_features
 
 
 def compute_distances_cat(dict_of_dist, point, train_set):
+    """
+    Compute the distance for categorical attributes between a given data point and the training data points
+    :param dict_of_dist:
+    :param point:
+    :param train_set:
+    :return:
+    """
     cat_distance = pd.Series(index=train_set.index, dtype=float)
     for index, row in train_set[dict_of_dist.keys()].iterrows():
         distance = 0.0
@@ -82,6 +89,12 @@ def compute_distances_cat(dict_of_dist, point, train_set):
 
 
 def calculate_vif(df, atts):
+    """
+    Compute VIF to exclude the multi-collinear features
+    :param df:
+    :param atts:
+    :return:
+    """
     stop = False
     atts2 = [item for item in atts]
     df = df.drop('target', axis=1)
@@ -89,13 +102,13 @@ def calculate_vif(df, atts):
         max_vif = 0.0
         worst_feature = None
         for feature in atts2:
-            X = [f for f in atts2 if f != feature]
-            X, y = df[X], df[feature]  # extract r-squared from the fit
-            r2 = linear_model.LinearRegression().fit(X, y).score(X, y)
+            x = [f for f in atts2 if f != feature]
+            x, y = df[x], df[feature]
+            r2 = linear_model.LinearRegression().fit(x, y).score(x, y)
             if r2 == 1:
                 vif = 100.0
             else:
-                vif = 1 / (1 - r2)  # return VIF DataFrame
+                vif = 1 / (1 - r2)
             if vif >= max_vif:
                 max_vif = vif
                 worst_feature = feature
@@ -113,6 +126,12 @@ def compute_stats(values):
 
 
 def margin_of_error(true_values, predicted):
+    """
+    Compute lower bound and margin of error for R value.
+    :param true_values:
+    :param predicted:
+    :return:
+    """
     delta_values = np.square(np.subtract(predicted, true_values))
     all_mu = np.square(predicted[None, :] - true_values[:, None])
     mu_values = all_mu.mean(axis=1)
@@ -127,6 +146,12 @@ def margin_of_error(true_values, predicted):
 
 @ignore_warnings(category=ConvergenceWarning)
 def train_lin_model(data, atts):
+    """
+    trains a local linear model to explain given prediction.
+    :param data:
+    :param atts:
+    :return:
+    """
     new_atts = calculate_vif(data, atts=atts)
     lmodel = linear_model.LassoCV(cv=5, random_state=1)
     lmodel.fit(data[new_atts], data['target'])
@@ -159,6 +184,13 @@ def train_lin_model(data, atts):
 
 
 def show_explanation(explanation, expl_model, data_point):
+    """
+    Visualize the BELLA explanation.
+    :param explanation:
+    :param expl_model:
+    :param data_point:
+    :return:
+    """
     exp_features = list(explanation.keys())
     importance = list(explanation.values())
     coeffs = []
@@ -266,6 +298,7 @@ def show_explanation(explanation, expl_model, data_point):
 
 def counterfactual_explanation(train_data, train_data_dummy, exp_point, exp_point_dummy, binary_features,
                                categorical_dis, numerical_features, ref_target, eps):
+    # Find potential counterfactual candidates
     stop = False
     while not stop:
         if train_data_dummy is not None:
@@ -274,6 +307,7 @@ def counterfactual_explanation(train_data, train_data_dummy, exp_point, exp_poin
         else:
             potential_refs = train_data[(ref_target - ref_target * eps <= train_data['target']) &
                                         (train_data['target'] <= ref_target + eps * ref_target)]
+        # If there are no candidates for current epsilon, increase epsilon
         if len(potential_refs) == 0:
             eps += 0.05
             stop = False
@@ -281,12 +315,14 @@ def counterfactual_explanation(train_data, train_data_dummy, exp_point, exp_poin
             stop = True
 
     top_k_potential = {}
+    # Sort counterfactual candidates by distance
     for index, row in potential_refs.iterrows():
         candidate = pd.DataFrame([train_data.loc[index]])
         if categorical_dis is not None:
             dist = compute_distances_cat(categorical_dis, exp_point, candidate).values[0]
-            dist += manhattan_distances(exp_point[numerical_features + binary_features],
-                                        candidate[numerical_features + binary_features])[0][0]
+            if len(numerical_features) > 0:
+                dist += manhattan_distances(exp_point[numerical_features + binary_features],
+                                            candidate[numerical_features + binary_features])[0][0]
         else:
             dist = manhattan_distances(exp_point[numerical_features + binary_features],
                                        candidate[numerical_features + binary_features])[0][0]
@@ -298,6 +334,7 @@ def counterfactual_explanation(train_data, train_data_dummy, exp_point, exp_poin
     dist_counter_min = 10000000000.0
     best_counterfactual_index = None
 
+    # For each candidate use BELLA to compute the local model
     for ref_i, ref_row in potential_refs.iterrows():
         ref_exp_point = pd.DataFrame([potential_refs.loc[ref_i]])
         if train_data_dummy is not None:
@@ -307,19 +344,25 @@ def counterfactual_explanation(train_data, train_data_dummy, exp_point, exp_poin
             exp_point_copy = exp_point.copy(deep=True)
             ref_exp_point_dummy = None
 
-        exp_box, exp_model, exp = explain(train_data, train_data_dummy, ref_exp_point, ref_exp_point_dummy,
-                                          binary_features, categorical_dis, numerical_features, verbose=False)
+        exp_box, exp_model, exp = explain(train_data, ref_exp_point, binary_features, categorical_dis,
+                                          numerical_features, train_dummy=train_data_dummy,
+                                          explain_point_dummy=ref_exp_point_dummy, verbose=False)
+        # Apply the changes to the original data point
         for feature in exp_model.feature_names_in_:
             if train_data_dummy is not None:
                 exp_point_copy.iloc[0][feature] = ref_exp_point_dummy[feature]
             else:
                 exp_point_copy.iloc[0][feature] = ref_exp_point[feature]
         ref_models[ref_i] = exp_model
+        # Compute the distance metric to choose the best counterfactual explanation
+        # Equation 6 in the paper
         if len(exp_model.feature_names_in_) > 1:
             if categorical_dis is not None:
                 dist_counter = compute_distances_cat(categorical_dis, ref_exp_point, exp_point).values[0]
-                dist_counter += manhattan_distances([ref_row[numerical_features + binary_features]],
-                                                    [exp_point[numerical_features + binary_features].squeeze()])[0][0]
+                if len(numerical_features) > 0:
+                    dist_counter += manhattan_distances([ref_row[numerical_features + binary_features]],
+                                                        [exp_point[numerical_features +
+                                                                   binary_features].squeeze()])[0][0]
                 dist_counter += manhattan_distances(ref_exp_point_dummy[exp_model.feature_names_in_],
                                                     exp_point_copy[exp_model.feature_names_in_]) / \
                                 len(exp_model.feature_names_in_)
@@ -333,8 +376,10 @@ def counterfactual_explanation(train_data, train_data_dummy, exp_point, exp_poin
         else:
             if categorical_dis is not None:
                 dist_counter = compute_distances_cat(categorical_dis, ref_exp_point, exp_point).values[0]
-                dist_counter += manhattan_distances([ref_row[numerical_features + binary_features]],
-                                                    [exp_point[numerical_features + binary_features].squeeze()])[0][0]
+                if len(numerical_features) > 0:
+                    dist_counter += manhattan_distances([ref_row[numerical_features + binary_features]],
+                                                        [exp_point[numerical_features +
+                                                                   binary_features].squeeze()])[0][0]
                 dist_counter += abs(ref_exp_point_dummy[exp_model.feature_names_in_].values -
                                     exp_point_copy[exp_model.feature_names_in_].values)
             else:
@@ -346,7 +391,7 @@ def counterfactual_explanation(train_data, train_data_dummy, exp_point, exp_poin
         if dist_counter <= dist_counter_min:
             dist_counter_min = dist_counter
             best_counterfactual_index = ref_i
-
+    # Output the updated data point using the best counterfactual
     if train_data_dummy is not None:
         exp_point_copy = exp_point_dummy.copy(deep=True)
         for feature in ref_models[best_counterfactual_index].feature_names_in_:
@@ -365,8 +410,8 @@ def counterfactual_explanation(train_data, train_data_dummy, exp_point, exp_poin
     return ref_models[best_counterfactual_index], exp_point_copy, potential_refs.loc[best_counterfactual_index]
 
 
-def explain(train, train_dummy, explain_point, explain_point_dummy, bin_fs, cat_dist, num_fs, reference_value=None,
-            epsilon=0.05, verbose=False):
+def explain(train, explain_point, bin_fs, cat_dist, num_fs, train_dummy=None, explain_point_dummy=None,
+            reference_value=None, epsilon=0.05, verbose=False):
     if reference_value:
         return counterfactual_explanation(train, train_dummy, explain_point, explain_point_dummy, bin_fs, cat_dist,
                                           num_fs, reference_value, epsilon)
@@ -383,8 +428,9 @@ def explain(train, train_dummy, explain_point, explain_point_dummy, bin_fs, cat_
             if train_dummy is not None:
                 data_dist = pd.concat([pd.DataFrame(explain_point_dummy), data_dist])
             else:
-                df = pd.concat([pd.DataFrame(explain_point), df])
+                data_dist = pd.concat([pd.DataFrame(explain_point), data_dist])
 
+        # Compute distances between current data point and the rest of data in the training set
         if cat_dist is not None:
             data_dist['distance_metric'] = compute_distances_cat(cat_dist, explain_point, df)
             if len(num_fs) > 0:
@@ -393,6 +439,7 @@ def explain(train, train_dummy, explain_point, explain_point_dummy, bin_fs, cat_
         else:
             data_dist['distance_metric'] = manhattan_distances(explain_point[num_fs + bin_fs],
                                                                data_dist[num_fs + bin_fs])[0]
+
         # Sort by target diff and distance_metric
         data_dist = data_dist.sort_values(['distance_metric'], ascending=[True])
         data_dist = data_dist.drop('distance_metric', axis=1)
@@ -401,15 +448,18 @@ def explain(train, train_dummy, explain_point, explain_point_dummy, bin_fs, cat_
         inside_box = pd.DataFrame([data_dist.loc[explain_point.index[0]]])
         outside_box = outside_box.drop([explain_point.index[0]])
         data_dist = data_dist.drop([explain_point.index[0]])
+
         # Initialization
         best_lb = 0.0
         explain_box = 0
         best_model = None
+
         # Optimal neighbourhood search
         for i, g in data_dist.groupby(np.arange(len(data_dist)) // (round(len(data_dist) / 100))):
             inside_box = pd.concat([inside_box, g])
             outside_box = outside_box.drop(list(g.index))
             if len(inside_box) >= max(10, 2 * len(fs)):
+                # Train linear model
                 lb, model, me = train_lin_model(inside_box, fs)
             else:
                 model = None

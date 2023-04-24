@@ -13,7 +13,7 @@ warnings.filterwarnings('ignore')
 
 classification = False
 
-datasets = ['auto', 'concrete', 'customer_churn', 'real_estate', 'servo', 'winequality', 'bike', 'cpu', 'echo', 'wind'
+datasets = ['servo', 'auto', 'concrete', 'customer_churn', 'real_estate', 'winequality', 'bike', 'cpu', 'echo', 'wind'
             'electrical', 'superconduct']
 
 for dataset_name in datasets:
@@ -39,6 +39,7 @@ for dataset_name in datasets:
     dummy_features = None
     categorical_dis = None
 
+    ###########################################################################################
     # Set features' types for each dataset
     if dataset_name == 'servo':
         binary_features = []
@@ -92,9 +93,10 @@ for dataset_name in datasets:
         for f in features:
             if f not in binary_features and f not in categorical_features:
                 numerical_features.append(f)
-
+    ###########################################################################################
     train, test = train_test_split(data, test_size=0.1)
 
+    # Standardize numerical features
     if len(numerical_features) > 0:
         standardizer = StandardScaler()
         scaled_train = train.copy(deep=True)
@@ -116,6 +118,18 @@ for dataset_name in datasets:
         test_dummy = pd.get_dummies(data=test, columns=categorical_features)
         dummy_features = train_dummy.columns
     explain_indexes = test.index.tolist()
+
+    # For smaller datasets,
+    if train_dummy is not None:
+        for c in train_dummy.columns:
+            if c != 'target':
+                if c not in test_dummy.columns:
+                    test_dummy[c] = 0
+
+        for c in test_dummy.columns:
+            if c != 'target':
+                if c not in train_dummy.columns:
+                    train_dummy[c] = 0
 
     bb_model = RandomForestRegressor(n_estimators=1000)
     # bb_model = MLPRegressor(hidden_layer_sizes=(500,), max_iter=4000, learning_rate_init=0.005,
@@ -139,17 +153,7 @@ for dataset_name in datasets:
     test['target'] = ytest_bb
     train['target'] = y_bb
 
-    if train_dummy is not None:
-        for c in train_dummy.columns:
-            if c != 'target':
-                if c not in test_dummy.columns:
-                    test_dummy[c] = 0
-
-        for c in test_dummy.columns:
-            if c != 'target':
-                if c not in train_dummy.columns:
-                    train_dummy[c] = 0
-
+    ###########################################################################################
     # Setup for LIME
     # Change feature names to the ones defined in the list 'attributes' (above)
     # Needed for computing generality
@@ -193,11 +197,11 @@ for dataset_name in datasets:
                                                      class_names=['target'],
                                                      categorical_features=lime_categorical_features, verbose=False,
                                                      mode='regression')
-    ##############
+    ###########################################################################################
 
     # Setup for SHAP
     shap_exp = shap.KernelExplainer(bb_model.predict, X_train_summary)
-    ##############
+    ###########################################################################################
     total_count = 0
 
     for explain_index in tqdm(explain_indexes):
@@ -211,11 +215,14 @@ for dataset_name in datasets:
             explain_point_dummy = pd.DataFrame([test_dummy.loc[explain_index]])
         features = [f_name for f_name in data.columns if f_name != 'target']
 
-        exp_box, exp_model, exp = explain(train, train_dummy, exp_point, explain_point_dummy, binary_features,
-                                          categorical_dis, numerical_features, verbose=False)
+        exp_box, exp_model, exp = explain(train, exp_point, binary_features, categorical_dis, numerical_features,
+                                          explain_point_dummy=explain_point_dummy, train_dummy=train_dummy,
+                                          verbose=False)
 
-        c_exp_model, new_data_point, counterfactual = explain(train, train_dummy, exp_point, explain_point_dummy,
-                                                              binary_features, categorical_dis, numerical_features,
+        c_exp_model, new_data_point, counterfactual = explain(train, exp_point, binary_features, categorical_dis,
+                                                              numerical_features,
+                                                              explain_point_dummy=explain_point_dummy,
+                                                              train_dummy=train_dummy,
                                                               reference_value=ref_target, verbose=False)
 
         bella_results['counterfactual_length'].append(len(c_exp_model.feature_names_in_))
@@ -230,7 +237,7 @@ for dataset_name in datasets:
         else:
             bella_results['accuracy'].append(
                 (sqrt((exp_point['target'].values[0] -
-                       exp_model.predict(explain_point_dummy[exp_model.feature_names_in_])[0]) ** 2)))
+                       exp_model.predict(exp_point[exp_model.feature_names_in_])[0]) ** 2)))
             bella_results['counterfactual_accuracy'].append(sqrt((counterfactual['target'] -
                                                                   bb_model.predict(new_data_point[features])[0]) ** 2))
 
@@ -278,8 +285,9 @@ for dataset_name in datasets:
                     if train_dummy is not None:
                         r_point_dummy = pd.DataFrame([train_dummy.loc[index]])
 
-                    r_exp_box, r_exp_model, r_exp = explain(train, train_dummy, r_point, r_point_dummy, binary_features,
-                                                            categorical_dis, numerical_features, verbose=False)
+                    r_exp_box, r_exp_model, r_exp = explain(train, r_point, binary_features, categorical_dis,
+                                                            numerical_features, train_dummy=train_dummy,
+                                                            explain_point_dummy=r_point_dummy, verbose=False)
 
                     if train_dummy is not None:
                         r_lime_explanation = lime_exp.explain_instance(train_dummy[feature_names].loc[index].values,

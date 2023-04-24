@@ -7,6 +7,6 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 file1 = open('requirements.txt', 'r')
 requirements = file1.readlines()
 for req in requirements:
-    reqs = subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--upgrade', req.strip("\n"), '--quiet'])
+    reqs = subprocess.check_call([sys.executable, '-m', 'pip', 'install', req.strip("\n"), '--quiet'])
 
 subprocess.call(['python3', 'experiments.py'])

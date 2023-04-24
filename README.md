@@ -12,3 +12,7 @@ feature values affect the outcome.
 Finally, the explanation can be applied to all data points in the optimal 
 neighbourhood, which should increase users' trust in the model and explanation.
 
+To run the experiments open the terminal and run:
+
+```python3 run.py```
+
