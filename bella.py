@@ -199,7 +199,8 @@ def show_explanation(explanation, expl_model, data_point):
             plt.arrow(x=1, y=prev_bar, dx=0, dy=item[1], lw=0, length_includes_head=True, head_width=0.3,
                       width=0.3, head_length=0.05 * y_range, facecolor="tab:blue")
         else:
-            plt.bar(1, item[1], align='center', color="tab:blue", bottom=prev_bar, width=0.3, linewidth=1, edgecolor='w')
+            plt.bar(1, item[1], align='center', color="tab:blue", bottom=prev_bar, width=0.3, linewidth=1,
+                    edgecolor='w')
         prev_bar += item[1]
 
     plt.hlines(y=prev_bar, xmin=1, xmax=1.5, linewidth=1, linestyles='--', color='k', alpha=0.4)
@@ -209,16 +210,18 @@ def show_explanation(explanation, expl_model, data_point):
             plt.arrow(x=1.5, y=prev_bar, dx=0, dy=item[1], lw=0, length_includes_head=True, head_width=0.3,
                       width=0.3, head_length=0.05 * y_range, facecolor="tab:red")
         else:
-            plt.bar(1.5, item[1], align='center', color="tab:red", bottom=prev_bar, width=0.3, linewidth=1, edgecolor='w')
+            plt.bar(1.5, item[1], align='center', color="tab:red", bottom=prev_bar, width=0.3, linewidth=1,
+                    edgecolor='w')
         prev_bar += item[1]
 
     prev_bar = expl_model.intercept_
     pos_offset = 0
     for item in positives:
         if abs(item[1]) > 0.05 * y_range:
-            plt.annotate(" {:0,.2f} x {} ".format(item[2], item[0]), (0.85, prev_bar + item[1] / 2), ha='right', va='center',
-                     size=10, xytext=(0, 0),
-                     textcoords='offset points')
+            plt.annotate(" {:0,.2f} x {} ".format(item[2], item[0]), (0.85, prev_bar + item[1] / 2), ha='right',
+                         va='center',
+                         size=10, xytext=(0, 0),
+                         textcoords='offset points')
         else:
             plt.annotate(" {:0,.2f} x {}  ".format(item[2], item[0]), (0.85, prev_bar + item[1] / 2), ha='right',
                          va='center',
@@ -230,9 +233,10 @@ def show_explanation(explanation, expl_model, data_point):
     neg_offset = 0
     for item in negatives:
         if abs(item[1]) > 0.05 * y_range:
-            plt.annotate(" {:0,.2f} x {} ".format(item[2], item[0]), (1.65, prev_bar + item[1] / 2), ha='left', va='bottom',
-                     size=10, xytext=(0, 0),
-                     textcoords='offset points')
+            plt.annotate(" {:0,.2f} x {} ".format(item[2], item[0]), (1.65, prev_bar + item[1] / 2), ha='left',
+                         va='bottom',
+                         size=10, xytext=(0, 0),
+                         textcoords='offset points')
         else:
             plt.annotate(" {:0,.2f} x {} ".format(item[2], item[0]), (1.65, prev_bar + item[1] / 2), ha='left',
                          va='bottom',
@@ -242,7 +246,8 @@ def show_explanation(explanation, expl_model, data_point):
 
         prev_bar += item[1]
     plt.hlines(y=prev_bar, xmin=1.5, xmax=2.4, linewidth=1, linestyles='--', color='k', alpha=0.4)
-    plt.annotate(" Explained value: {:0,.2f}".format(prev_bar), (1.8, prev_bar), ha='center', va='top', size=10, xytext=(3, neg_offset),
+    plt.annotate(" Explained value: {:0,.2f}".format(prev_bar), (1.8, prev_bar), ha='center', va='top', size=10,
+                 xytext=(3, neg_offset),
                  textcoords='offset points')
     plt.xlim(-0.1, 2.4)
     plt.xticks([1, 1.5], ['increase', 'decrease'])
@@ -253,7 +258,7 @@ def show_explanation(explanation, expl_model, data_point):
         top=False,  # ticks along the top edge are off
         labelbottom=False)  # labels along the bottom edge are off
     plt.tick_params(labelright=True)
-    plt.ylim(y_min-0.17*y_range, y_max + 0.17*y_range)
+    plt.ylim(y_min - 0.17 * y_range, y_max + 0.17 * y_range)
     plt.savefig('bella.png', bbox_inches='tight')
     # plt.show()
     plt.close()
@@ -261,15 +266,12 @@ def show_explanation(explanation, expl_model, data_point):
 
 def counterfactual_explanation(train_data, train_data_dummy, exp_point, exp_point_dummy, binary_features,
                                categorical_dis, numerical_features, ref_target, eps):
-
     stop = False
     while not stop:
         if train_data_dummy is not None:
-            features = [f_name for f_name in train_data_dummy.columns if f_name != 'target']
             potential_refs = train_data_dummy[(ref_target - ref_target * eps <= train_data_dummy['target']) &
                                               (train_data_dummy['target'] <= ref_target + eps * ref_target)]
         else:
-            features = [f_name for f_name in train_data.columns if f_name != 'target']
             potential_refs = train_data[(ref_target - ref_target * eps <= train_data['target']) &
                                         (train_data['target'] <= ref_target + eps * ref_target)]
         if len(potential_refs) == 0:
@@ -290,10 +292,7 @@ def counterfactual_explanation(train_data, train_data_dummy, exp_point, exp_poin
                                        candidate[numerical_features + binary_features])[0][0]
         top_k_potential[index] = dist
     top_k_potential = dict(sorted(top_k_potential.items(), key=lambda x: abs(x[1]), reverse=True)[:5])
-    if train_data_dummy is not None:
-        potential_refs = train_data_dummy.loc[list(top_k_potential.keys())]
-    else:
-        potential_refs = potential_refs.loc[list(top_k_potential.keys())]
+    potential_refs = train_data.loc[list(top_k_potential.keys())]
 
     ref_models = {}
     dist_counter_min = 10000000000.0
@@ -311,19 +310,22 @@ def counterfactual_explanation(train_data, train_data_dummy, exp_point, exp_poin
         exp_box, exp_model, exp = explain(train_data, train_data_dummy, ref_exp_point, ref_exp_point_dummy,
                                           binary_features, categorical_dis, numerical_features, verbose=False)
         for feature in exp_model.feature_names_in_:
-            exp_point_copy.iloc[0][feature] = ref_exp_point[feature]
+            if train_data_dummy is not None:
+                exp_point_copy.iloc[0][feature] = ref_exp_point_dummy[feature]
+            else:
+                exp_point_copy.iloc[0][feature] = ref_exp_point[feature]
         ref_models[ref_i] = exp_model
         if len(exp_model.feature_names_in_) > 1:
             if categorical_dis is not None:
                 dist_counter = compute_distances_cat(categorical_dis, ref_exp_point, exp_point).values[0]
                 dist_counter += manhattan_distances([ref_row[numerical_features + binary_features]],
-                                                    [exp_point[numerical_features+binary_features].squeeze()])[0][0]
+                                                    [exp_point[numerical_features + binary_features].squeeze()])[0][0]
                 dist_counter += manhattan_distances(ref_exp_point_dummy[exp_model.feature_names_in_],
                                                     exp_point_copy[exp_model.feature_names_in_]) / \
                                 len(exp_model.feature_names_in_)
             else:
                 dist_counter = manhattan_distances([ref_row[numerical_features + binary_features]],
-                                                    [exp_point[numerical_features + binary_features].squeeze()])[0][0]
+                                                   [exp_point[numerical_features + binary_features].squeeze()])[0][0]
                 dist_counter += manhattan_distances(ref_exp_point[exp_model.feature_names_in_],
                                                     exp_point_copy[exp_model.feature_names_in_]) / \
                                 len(exp_model.feature_names_in_)
@@ -332,12 +334,12 @@ def counterfactual_explanation(train_data, train_data_dummy, exp_point, exp_poin
             if categorical_dis is not None:
                 dist_counter = compute_distances_cat(categorical_dis, ref_exp_point, exp_point).values[0]
                 dist_counter += manhattan_distances([ref_row[numerical_features + binary_features]],
-                                             [exp_point[numerical_features + binary_features].squeeze()])[0][0]
+                                                    [exp_point[numerical_features + binary_features].squeeze()])[0][0]
                 dist_counter += abs(ref_exp_point_dummy[exp_model.feature_names_in_].values -
                                     exp_point_copy[exp_model.feature_names_in_].values)
             else:
                 dist_counter = manhattan_distances([ref_row[numerical_features + binary_features]],
-                                                    [exp_point[numerical_features + binary_features].squeeze()])[0][0]
+                                                   [exp_point[numerical_features + binary_features].squeeze()])[0][0]
                 dist_counter += abs(ref_exp_point[exp_model.feature_names_in_].values -
                                     exp_point_copy[exp_model.feature_names_in_].values)
 
@@ -349,21 +351,16 @@ def counterfactual_explanation(train_data, train_data_dummy, exp_point, exp_poin
         exp_point_copy = exp_point_dummy.copy(deep=True)
         for feature in ref_models[best_counterfactual_index].feature_names_in_:
             exp_point_copy.iloc[0][feature] = train_data_dummy.loc[best_counterfactual_index][feature]
-
     else:
         exp_point_copy = exp_point.copy(deep=True)
         for feature in ref_models[best_counterfactual_index].feature_names_in_:
             exp_point_copy.iloc[0][feature] = potential_refs.loc[best_counterfactual_index][feature]
-        error = (potential_refs.loc[best_counterfactual_index]['target'] -
-                 bb_model.predict(exp_point_copy[features])[0]) ** 2
-        length_of_counterfactual = len(ref_models[best_counterfactual_index].feature_names_in_)
 
-    counter_explanation = {}
-    for f in features:
-        val = exp_point_copy[f].values[0] - exp_point[f].values[0]
-        if val != 0.0:
-            counter_explanation[f] = val
-    counter_explanation = dict(sorted(counter_explanation.items(), key=lambda x: abs(x[1]), reverse=True))
+    # counter_explanation = {}
+    # for f in features:
+    # val = exp_point_copy[f].values[0] - exp_point[f].values[0]
+    # if val != 0.0:
+    # counter_explanation[f] = val
 
     return ref_models[best_counterfactual_index], exp_point_copy, potential_refs.loc[best_counterfactual_index]
 
@@ -434,5 +431,3 @@ def explain(train, train_dummy, explain_point, explain_point_dummy, bin_fs, cat_
             show_explanation(explanation, best_model, e_point)
 
         return explain_box, best_model, explanation
-
-

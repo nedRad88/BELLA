@@ -218,18 +218,21 @@ for dataset_name in datasets:
                                                               binary_features, categorical_dis, numerical_features,
                                                               reference_value=ref_target, verbose=False)
 
-        bella_results['counterfactual_accuracy'] = sqrt((counterfactual['target'] -
-                                                         bb_model.predict(new_data_point[features])[0]) ** 2)
         bella_results['counterfactual_length'].append(len(c_exp_model.feature_names_in_))
 
         if train_dummy is not None:
             bella_results['accuracy'].append((sqrt((explain_point_dummy['target'].values[0] -
                                                     exp_model.predict(
                                                         explain_point_dummy[exp_model.feature_names_in_])[0])**2)))
+            bella_results['counterfactual_accuracy'].append(sqrt((counterfactual['target'] -
+                                                                  bb_model.predict(
+                                                                      new_data_point[old_column_names])[0]) ** 2))
         else:
             bella_results['accuracy'].append(
                 (sqrt((exp_point['target'].values[0] -
                        exp_model.predict(explain_point_dummy[exp_model.feature_names_in_])[0]) ** 2)))
+            bella_results['counterfactual_accuracy'].append(sqrt((counterfactual['target'] -
+                                                                  bb_model.predict(new_data_point[features])[0]) ** 2))
 
         if train_dummy is not None:
             shap_explanation = shap_exp.shap_values(explain_point_dummy[feature_names], silent=True)
@@ -326,5 +329,11 @@ for dataset_name in datasets:
 
     print("Black box - RF, dataset: {}".format(dataset_name))
     print("BELLA: ", bella_results)
+    for key, value in bella_results.items():
+        print("{}: {:.2f}\n".format(key, mean(value)))
     print("LIME: ", lime_results)
+    for key, value in lime_results.items():
+        print("{}: {:.2f}\n".format(key, mean(value)))
     print("SHAP:", shap_results)
+    for key, value in shap_results.items():
+        print("{}: {:.2f}\n".format(key, mean(value)))
