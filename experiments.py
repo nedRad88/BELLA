@@ -1,11 +1,11 @@
 from lime import lime_tabular
-import re
 from bella import *
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.neural_network import MLPRegressor
+from utils import *
 import shap
 import warnings
 warnings.filterwarnings('ignore')
@@ -13,86 +13,14 @@ warnings.filterwarnings('ignore')
 
 classification = False
 
-predict_error = []
-dataset_name = "customer_churn"
-
 datasets = ['auto', 'concrete', 'customer_churn', 'real_estate', 'servo', 'winequality', 'bike', 'cpu', 'echo', 'wind'
             'electrical', 'superconduct']
-
-
-def compute_confidence(Xtrain, path):
-    total = 0
-    for i in range(len(Xtrain)):
-        d = Xtrain.iloc[i]
-        if eval(path):
-            total += 1
-    return total
-
-
-def explain_predict(explanation_model, neighbourhood_data):
-    true = []
-    predicted = []
-    for index, row in neighbourhood_data.iterrows():
-        prediction = explanation_model['base']
-        true.append(row['target'])
-        for key, value in explanation_model.items():
-            if key != 'base':
-                prediction += value
-        predicted.append(prediction)
-
-    return mean_squared_error(true, predicted)
-
-
-def to_code(string):
-    code = string
-    code = code.replace(" ", "")
-    code = re.sub("[a-z]+", lambda m: "d['%s']" % m.group(0), code)
-    try:
-        code = re.sub("<(d['[a-z]+'])<=", lambda m: "<%s and %s<=" % (m.group(1), m.group(1)), code)
-    except re.error:
-        pass
-    try:
-        code = re.sub("(d['[a-z]+'])=", lambda m: "%s==" % m.group(1), code)
-    except re.error:
-        pass
-    # code = re.sub("\b(?!and)\b\S+", lambda m: "d['%s']" % m.group(0), code)
-    code = code.replace(",", ") and (")
-    code = code.replace(";", " or ")
-    return code
-
-
-def compute_exp_distance(dict1, dict2, features):
-    distance = 0.0
-    n_features = 0
-    for f in features:
-        if f in dict1:
-            v1 = dict1[f]
-        else:
-            v1 = 0.0
-        if f in dict2:
-            v2 = dict2[f]
-        else:
-            v2 = 0.0
-        if f in dict1 or f in dict2:
-            n_features += 1
-        if v1 != 0.0 or v2 != 0.0:
-            distance += abs(v2 - v1)/(abs(v1) + abs(v2))
-
-    return 1 - distance/len(features)
-
-
-def compute_exp_distance_shap(l1, l2, num_of_features):
-    distance = 0.0
-    for i in range(len(l1)):
-        if l1[i] != 0.0 or l2[i] != 0.0:
-            distance += abs(l2[i] - l1[i]) / (abs(l1[i]) + abs(l2[i]))
-    return 1 - distance/num_of_features
-
 
 for dataset_name in datasets:
     data = pd.read_csv("./datasets/" + dataset_name + ".csv", header=0)
     eps = 0.05
-    bella_results = {'accuracy': [], 'length': [], 'generality': [], 'robustness': []}
+    bella_results = {'accuracy': [], 'length': [], 'generality': [], 'robustness': [], 'counterfactual_accuracy': [],
+                     'counterfactual_length': []}
     lime_results = {'accuracy': [], 'length': [], 'generality': [], 'robustness': []}
     shap_results = {'accuracy': [], 'length': [], 'generality': [], 'robustness': []}
 
@@ -102,6 +30,9 @@ for dataset_name in datasets:
                   'bd', 'be', 'bf', 'bg', 'bh', 'bi', 'bj', 'bk', 'bl', 'bm', 'bn', 'bo', 'bp', 'bq', 'br', 'bs', 'bt',
                   'bu', 'bv', 'bw', 'bx', 'by', 'bz']
 
+    target_max = max(data['target'])
+    target_min = min(data['target'])
+    thirty_qle = 0.3 * (target_max - target_min)
     features = [f_name for f_name in data.columns if f_name != 'target']
     train_dummy = None
     test_dummy = None
@@ -271,6 +202,10 @@ for dataset_name in datasets:
 
     for explain_index in tqdm(explain_indexes):
         exp_point = pd.DataFrame([test.loc[explain_index]])
+        if exp_point['target'].values[0] + thirty_qle < target_max:
+            ref_target = exp_point['target'].values[0] + thirty_qle
+        else:
+            ref_target = exp_point['target'].values[0] - thirty_qle
         explain_point_dummy = None
         if train_dummy is not None:
             explain_point_dummy = pd.DataFrame([test_dummy.loc[explain_index]])
@@ -278,6 +213,15 @@ for dataset_name in datasets:
 
         exp_box, exp_model, exp = explain(train, train_dummy, exp_point, explain_point_dummy, binary_features,
                                           categorical_dis, numerical_features, verbose=False)
+
+        c_exp_model, new_data_point, counterfactual = explain(train, train_dummy, exp_point, explain_point_dummy,
+                                                              binary_features, categorical_dis, numerical_features,
+                                                              reference_value=ref_target, verbose=False)
+
+        bella_results['counterfactual_accuracy'] = sqrt((counterfactual['target'] -
+                                                         bb_model.predict(new_data_point[features])[0]) ** 2)
+        bella_results['counterfactual_length'].append(len(c_exp_model.feature_names_in_))
+
         if train_dummy is not None:
             bella_results['accuracy'].append((sqrt((explain_point_dummy['target'].values[0] -
                                                     exp_model.predict(

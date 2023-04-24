@@ -349,9 +349,7 @@ def counterfactual_explanation(train_data, train_data_dummy, exp_point, exp_poin
         exp_point_copy = exp_point_dummy.copy(deep=True)
         for feature in ref_models[best_counterfactual_index].feature_names_in_:
             exp_point_copy.iloc[0][feature] = train_data_dummy.loc[best_counterfactual_index][feature]
-        error = (potential_refs.loc[best_counterfactual_index]['target'] -
-                     bb_model.predict(exp_point_copy[features])[0]) ** 2
-        length_of_counterfactual = (len(ref_models[best_counterfactual_index].feature_names_in_))
+
     else:
         exp_point_copy = exp_point.copy(deep=True)
         for feature in ref_models[best_counterfactual_index].feature_names_in_:
@@ -367,7 +365,7 @@ def counterfactual_explanation(train_data, train_data_dummy, exp_point, exp_poin
             counter_explanation[f] = val
     counter_explanation = dict(sorted(counter_explanation.items(), key=lambda x: abs(x[1]), reverse=True))
 
-    return counter_explanation, error, length_of_counterfactual
+    return ref_models[best_counterfactual_index], exp_point_copy, potential_refs.loc[best_counterfactual_index]
 
 
 def explain(train, train_dummy, explain_point, explain_point_dummy, bin_fs, cat_dist, num_fs, reference_value=None,
