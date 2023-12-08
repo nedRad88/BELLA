@@ -148,6 +148,7 @@ def margin_of_error(true_values, predicted):
 def train_lin_model(data, atts):
     """
     trains a local linear model to explain given prediction.
+    Algorithm 3 from the paper
     :param data:
     :param atts:
     :return:
@@ -296,6 +297,8 @@ def show_explanation(explanation, expl_model, data_point):
     plt.close()
 
 
+
+#Computing counterfactual explanation - Algorithm 4 from the paper
 def counterfactual_explanation(train_data, train_data_dummy, exp_point, exp_point_dummy, binary_features,
                                categorical_dis, numerical_features, ref_target, eps):
     # Find potential counterfactual candidates
@@ -410,6 +413,7 @@ def counterfactual_explanation(train_data, train_data_dummy, exp_point, exp_poin
     return ref_models[best_counterfactual_index], exp_point_copy, potential_refs.loc[best_counterfactual_index]
 
 
+# Computing explanation - Algorithm 1 from the paper
 def explain(train, explain_point, bin_fs, cat_dist, num_fs, train_dummy=None, explain_point_dummy=None,
             reference_value=None, epsilon=0.05, verbose=False):
     if reference_value:
@@ -455,6 +459,7 @@ def explain(train, explain_point, bin_fs, cat_dist, num_fs, train_dummy=None, ex
         best_model = None
 
         # Optimal neighbourhood search
+        # Algorithm 2 from the paper
         for i, g in data_dist.groupby(np.arange(len(data_dist)) // (round(len(data_dist) / 100))):
             inside_box = pd.concat([inside_box, g])
             outside_box = outside_box.drop(list(g.index))

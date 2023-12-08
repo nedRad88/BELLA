@@ -6,8 +6,10 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.neural_network import MLPRegressor
 from utils import *
+from MAPLE import *
 import shap
 import warnings
+import numpy as np
 warnings.filterwarnings('ignore')
 
 
@@ -23,7 +25,8 @@ for dataset_name in datasets:
                      'counterfactual_length': []}
     lime_results = {'accuracy': [], 'length': [], 'generality': [], 'robustness': []}
     shap_results = {'accuracy': [], 'length': [], 'generality': [], 'robustness': []}
-
+    maple_results = {'accuracy': [], 'length': [], 'generality': [], 'robustness': []}
+     
     attributes = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't',
                   'u', 'v', 'w', 'x', 'y', 'z', 'aa', 'ab', 'ac', 'ad', 'ae', 'af', 'ag', 'ah', 'ai', 'aj', 'ak', 'al',
                   'am', 'an', 'ao', 'ap', 'aq', 'ar', 'as', 'at', 'au', 'av', 'aw', 'ax', 'ay', 'az', 'ba', 'bb', 'bc',
@@ -202,6 +205,30 @@ for dataset_name in datasets:
     # Setup for SHAP
     shap_exp = shap.KernelExplainer(bb_model.predict, X_train_summary)
     ###########################################################################################
+    
+    # Setup for MAPLE
+    
+    if train_dummy is not None:
+        train_maple = train_dummy.copy(deep=True)
+        train_maple['target'] = y_bb
+        X_val = train_maple.sample(frac=0.3)
+        MR_val = X_val['target']
+        X_val = X_val.drop('target', axis=1)
+        train_maple = train_maple.drop('target', axis=1)
+        MR_train = y_bb
+
+    else:
+        train_maple = train.copy(deep=True)
+        train_maple['target'] = y_bb
+        X_val = train_maple.sample(frac=0.3)
+        MR_val = X_val['target']
+        X_val = X_val.drop('target', axis=1)
+        train_maple = train_maple.drop('target', axis=1)
+        MR_train = y_bb
+    maple_explainer = MAPLE(train_maple.values, MR_train, X_val.values, MR_val)
+
+    ###########################################################################################
+    
     total_count = 0
 
     for explain_index in tqdm(explain_indexes):
@@ -246,11 +273,14 @@ for dataset_name in datasets:
             lime_explanation = lime_exp.explain_instance(test_dummy[feature_names].loc[explain_index].values,
                                                          bb_model.predict,
                                                          num_features=len(exp_model.feature_names_in_))
+            maple_explanation = maple_explainer.explain(test_dummy[feature_names].loc[explain_index].values)
+                                                              
         else:
             shap_explanation = shap_exp.shap_values(exp_point[feature_names], silent=True)
             lime_explanation = lime_exp.explain_instance(test[feature_names].loc[explain_index].values,
                                                          bb_model.predict,
                                                          num_features=len(exp_model.feature_names_in_))
+            maple_explanation = maple_explainer.explain(test[feature_names].loc[explain_index].values)
 
         features = [f_name for f_name in data.columns if f_name != 'target']
         exp_features = lime_explanation.domain_mapper.exp_feature_names
@@ -263,6 +293,16 @@ for dataset_name in datasets:
         lime_results['length'].append(len(exp_model.feature_names_in_))
         lime_results['accuracy'].append(sqrt((exp_point['target'].values[0] - lime_pred) ** 2))
         shap_results['accuracy'].append(0.0)
+        maple_results['accuracy'].append(sqrt((exp_point['target'].values[0] - maple_explanation['pred'][0])**2))
+        expl_maple = {}
+        for i in range(len(train_maple.columns)):
+            expl_maple[train_maple.columns[i]] = maple_explanation['coefs'][i + 1]
+        maple_exp_features = maple_explanation['coefs'][1:]
+        exp_len = 0
+        for item in maple_exp_features:
+            if item != 0.0:
+                exp_len += 1
+        maple_results['length'].append(exp_len)
         e = lime_explanation.as_list()
         shap_length = 0
         for item in shap_explanation[0]:
@@ -278,6 +318,7 @@ for dataset_name in datasets:
             r_lime = 0.0
             r_count = 0.0
             r_shap = 0.0
+            r_maple = 0.0
             for index, row in r_box95.iterrows():
                 r_point_dummy = None
                 if index != explain_index:
@@ -294,12 +335,14 @@ for dataset_name in datasets:
                                                                        bb_model.predict,
                                                                        num_features=len(exp_model.feature_names_in_))
                         r_shap_explanation = shap_exp.shap_values(r_point_dummy[feature_names], silent=True)
+                        r_maple_explanation = maple_explainer.explain(train_dummy[train_maple.columns].loc[index].values)
 
                     else:
                         r_lime_explanation = lime_exp.explain_instance(train[feature_names].loc[index].values,
                                                                        bb_model.predict,
                                                                        num_features=len(exp_model.feature_names_in_))
                         r_shap_explanation = shap_exp.shap_values(r_point[feature_names], silent=True)
+                        r_maple_explanation = maple_explainer.explain(train[train_maple.columns].loc[index].values)
 
                     if r_exp_model:
                         r_exp_features = r_lime_explanation.domain_mapper.exp_feature_names
@@ -311,12 +354,17 @@ for dataset_name in datasets:
                         r += compute_exp_distance(exp, r_exp, features=feature_names)
                         r_shap += compute_exp_distance_shap(shap_explanation[0], r_shap_explanation[0],
                                                             len(feature_names))
+                        r_expl_maple = {}
+                        for i in range(len(train_maple.columns)):
+                            r_expl_maple[train_maple.columns[i]] = r_maple_explanation['coefs'][i + 1]
+                        r_maple += compute_exp_distance(expl_maple, r_expl_maple, features=train_maple.columns)
                         r_count += 1.0
 
             if len(r_box95) >= 2:
                 bella_results['robustness'].append(r / r_count)
                 lime_results['robustness'].append(r_lime / r_count)
                 shap_results['robustness'].append(r_shap/r_count)
+                maple_results['robustness'].append(r_maple / r_count)
             total_count += 1
 
         for t in e:
@@ -334,6 +382,7 @@ for dataset_name in datasets:
         bella_results['generality'].append(len(exp_box) - 1)
         shap_results['generality'].append(0.0)
         lime_results['generality'].append(total)
+        maple_results['generality'].append(np.count_nonzero(maple_explanation['weights']))
 
     print("Black box - RF, dataset: {}".format(dataset_name))
     print("BELLA: ", bella_results)
@@ -344,4 +393,7 @@ for dataset_name in datasets:
         print("{}: {:.2f}\n".format(key, mean(value)))
     print("SHAP:", shap_results)
     for key, value in shap_results.items():
+        print("{}: {:.2f}\n".format(key, mean(value)))
+    print("MAPLE:", maple_results)
+    for key, value in maple_results.items():
         print("{}: {:.2f}\n".format(key, mean(value)))
