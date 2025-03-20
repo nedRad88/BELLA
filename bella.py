@@ -460,7 +460,7 @@ def explain(train, explain_point, bin_fs, cat_dist, num_fs, train_dummy=None, ex
 
         # Optimal neighbourhood search
         # Algorithm 2 from the paper
-        for i, g in data_dist.groupby(np.arange(len(data_dist)) // (round(len(data_dist) / 100))):
+        for i, g in data_dist.groupby(np.arange(len(data_dist)) // (round(len(data_dist) / 10))):
             inside_box = pd.concat([inside_box, g])
             outside_box = outside_box.drop(list(g.index))
             if len(inside_box) >= max(10, 2 * len(fs)):
