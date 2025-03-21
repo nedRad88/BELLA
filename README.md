@@ -1,11 +1,11 @@
 # BELLA
 
 <img style="width: 40%" align="right" src="docs/bella.svg" />
-BELLA is a deterministic method to explain a given numerical value in a tabular dataset -- for example the prediction of a black-box regressor. The expanations are accurate, general, simple, robust, deterministic, and verifiable. BELLA can provide both factual and counterfactual explanations.
+BELLA is a deterministic method to explain a given numerical value in a given tabular dataset -- for example the price of a house in a table that contains houses with their characteristics and prices. The values can also come from a black box regressor, in which case BELLA serves to explain the predictions of that regressor.
 <br/><br/>
 BELLA computes the optimal neighbourhood around the given data point and then trains a linear regression model on this neighborhood. This model can then be used to explain the value of the data point. Since the model has been trained in the input feature space, one can easily change the feature values in this model to see how this affects the outcome. BELLA tries to maximize the size of the neighborhood, and so its explanations apply not just to the point in question, but also to other points in the vicinity.
 <br/><br/>
-Since BELLA works on the dataset and does not need access to the black-box model, the method can explain not just models, but arbitrary tabular data values.
+BELLA can provide both factual and counterfactual explanations, and the explanations are accurate, general, simple, robust, deterministic, and verifiable.
 
 ## How to run BELLA
 To run the experiments, open the terminal and run:
