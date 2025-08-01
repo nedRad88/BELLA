@@ -14,16 +14,13 @@ To run the experiments, open the terminal and run:
 
 ## Conditions of use
 
-The code is made available under a [MIT License](docs/license.txt) by [Nedeljko Radulovic](https://nedrad88.github.io/), [Albert Bifet](https://albertbifet.com/), and [Fabian M. Suchanek](https://suchanek.name). If you use BELLA for scientific purposes, please cite [our paper](https://arxiv.org/abs/2305.11311)
+The code is made available under a [MIT License](docs/license.txt) by [Nedeljko Radulovic](https://nedrad88.github.io/), [Albert Bifet](https://albertbifet.com/), and [Fabian M. Suchanek](https://suchanek.name). If you use BELLA for scientific purposes, please cite [our paper](https://suchanek.name/work/publications/tmlr-2025.pdf).
 
 ```
-@misc{radulovic2023bellablackboxmodel,
+@article{radulovic2023bellablackboxmodel,
       title={BELLA: Black box model Explanations by Local Linear Approximations}, 
       author={Nedeljko Radulovic and Albert Bifet and Fabian M. Suchanek},
-      year={2023},
-      eprint={2305.11311},
-      archivePrefix={arXiv},
-      primaryClass={cs.LG},
-      url={https://arxiv.org/abs/2305.11311}, 
+      year={2025},
+      journal={Transactions on Machine Learning Research}
 }
 ```
