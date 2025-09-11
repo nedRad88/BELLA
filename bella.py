@@ -12,6 +12,12 @@ from sklearn.utils._testing import ignore_warnings
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.metrics import mean_squared_error
 
+import warnings
+from typing import Iterable, Optional, Union, Dict, Any, Tuple
+from sklearn.preprocessing import StandardScaler
+from utils import compute_categorical_distances
+
+warnings.filterwarnings("ignore")
 
 def discretize(data, cols, n_bins, labels=None):
     """
@@ -486,3 +492,206 @@ def explain(train, explain_point, bin_fs, cat_dist, num_fs, train_dummy=None, ex
             show_explanation(explanation, best_model, e_point)
 
         return explain_box, best_model, explanation
+
+class BellaExplainer:
+    """
+
+    Parameters
+    ----------
+    train : pd.DataFrame
+        Training dataframe including the target column.
+    target_column : str
+        Name of the target column in `train`.
+    binary_features, categorical_features, numerical_features : Iterable[str]
+        Feature lists (can be empty).
+    standardize : bool, default True
+        Standardize numerical features if provided.
+    """
+
+    def __init__(
+        self,
+        train: pd.DataFrame,
+        target_column: str,
+        binary_features: Iterable[str] = (),
+        categorical_features: Iterable[str] = (),
+        numerical_features: Iterable[str] = (),
+        standardize: bool = True,
+    ):
+        # Normalize config
+        self.target_column = target_column
+        self.binary_features = list(binary_features or [])
+        self.categorical_features = list(categorical_features or [])
+        self.numerical_features = list(numerical_features or [])
+        self.standardize = bool(standardize)
+
+        # Validate train
+        if self.target_column not in train.columns:
+            raise ValueError(f"Target column '{self.target_column}' not found in train.")
+
+        # Ensure declared features (if any) exist in train
+        declared = self.binary_features + self.categorical_features + self.numerical_features
+        missing_declared = [c for c in declared if c not in train.columns]
+        if missing_declared:
+            raise ValueError(
+                f"Declared features not found in train columns: {missing_declared}"
+            )
+
+        # Copy and prepare train
+        self.train = train.copy(deep=True)
+
+        # Fit scaler if we have numeric features and standardization enabled
+        self.standardizer: Optional[StandardScaler] = None
+        if self.numerical_features and self.standardize:
+            self.standardizer = StandardScaler()
+            self.train.loc[:, self.numerical_features] = self.standardizer.fit_transform(
+                self.train[self.numerical_features].values
+            )
+
+        # Compute categorical distances if we have categorical features
+        self.categorical_dis = None
+        if self.categorical_features:
+            self.categorical_dis = compute_categorical_distances(
+                self.train, self.categorical_features, self.numerical_features
+            )
+
+        # X = train without target
+        self.X = self.train.drop(columns=[self.target_column])
+
+        # One-hot training frame (reference) only if we have categorical features
+        self.train_dummy = None
+        if self.categorical_features:
+            self.train_dummy = pd.get_dummies(self.X, columns=self.categorical_features)
+
+    # ---------- helpers ----------
+
+    def _required_features(self) -> list[str]:
+        """List of declared features (can be empty)."""
+        return self.binary_features + self.categorical_features + self.numerical_features
+
+    def _prep_point_df(
+        self, explain_point: Union[Dict[str, Any], pd.Series, pd.DataFrame]
+    ) -> pd.DataFrame:
+        """
+        Normalize an explain_point into a single-row DataFrame.
+
+        Valid inputs:
+        - dict
+        - pandas.Series
+        - single-row pandas.DataFrame
+
+        Raises
+        ------
+        TypeError  : invalid type
+        ValueError : wrong row count or missing required features
+        """
+        # Type to 1-row DataFrame
+        if isinstance(explain_point, dict):
+            df = pd.DataFrame([explain_point])
+        elif isinstance(explain_point, pd.Series):
+            df = pd.DataFrame([explain_point.to_dict()])
+        elif isinstance(explain_point, pd.DataFrame):
+            if len(explain_point) != 1:
+                raise ValueError(
+                    f"`explain_point` DataFrame must contain exactly one row, got {len(explain_point)}."
+                )
+            df = explain_point.copy(deep=True)
+        else:
+            raise TypeError(
+                f"`explain_point` must be dict, pandas.Series, or single-row pandas.DataFrame, "
+                f"got {type(explain_point)}."
+            )
+
+        # Enforce presence according to policy
+        required = self._required_features()
+        if required:
+            missing_all = [c for c in required if c not in df.columns]
+            if missing_all:
+                raise ValueError(
+                    f"Missing feature(s) in explain_point: {missing_all}. "
+                    f"All declared features must be provided."
+                )
+
+        # Apply scaling if applicable
+        if self.numerical_features and self.standardizer is not None:
+            df.loc[:, self.numerical_features] = self.standardizer.transform(
+                df[self.numerical_features].values
+            )
+
+        return df
+
+    def _align_dummies(self, test_no_target: pd.DataFrame) -> Optional[pd.DataFrame]:
+        """One-hot encode a single-row test frame to match train dummies (or None if no categoricals)."""
+        if not self.categorical_features:
+            return None
+
+        test_dummy = pd.get_dummies(test_no_target, columns=self.categorical_features)
+
+        # Add missing columns from train_dummy
+        for c in self.train_dummy.columns:
+            if c not in test_dummy.columns:
+                test_dummy[c] = 0
+
+        # Drop extra columns unseen in train
+        extra = [c for c in test_dummy.columns if c not in self.train_dummy.columns]
+        if extra:
+            test_dummy = test_dummy.drop(columns=extra)
+
+        # Reorder to train reference
+        test_dummy = test_dummy[self.train_dummy.columns]
+        return test_dummy
+
+    def explain(
+        self,
+        explain_point: Union[Dict[str, Any], pd.Series, pd.DataFrame],
+        reference_value: Optional[float] = None,
+        verbose: bool = True,
+    ) -> Tuple[Any, Any, Any]:
+        """
+        Compute an explanation for a single point.
+
+        Returns
+        -------
+        - If reference_value is not None:
+            (c_exp_model, new_data_point, counterfactual)
+        - Else:
+            (exp_box, exp_model, exp)
+        """
+        test = self._prep_point_df(explain_point)
+
+        # Build test without target (keep columns that exist; target may be absent)
+        test_no_target = (
+            test.drop(columns=[self.target_column])
+            if self.target_column in test.columns
+            else test.copy(deep=True)
+        )
+
+        # Prepare dummy versions if needed
+        explain_point_dummy = self._align_dummies(test_no_target)
+        train_dummy = self.train_dummy  # can be None
+
+        # Point sent to bella
+        exp_point = test_no_target.copy(deep=True)
+
+        if reference_value is not None:
+            return bella_explain(
+                self.X,
+                exp_point,
+                self.binary_features,
+                self.categorical_dis,
+                self.numerical_features,
+                explain_point_dummy=explain_point_dummy,
+                train_dummy=train_dummy,
+                reference_value=reference_value,
+                verbose=verbose,
+            )
+        else:
+            return bella_explain(
+                self.X,
+                exp_point,
+                self.binary_features,
+                self.categorical_dis,
+                self.numerical_features,
+                explain_point_dummy=explain_point_dummy,
+                train_dummy=train_dummy,
+                verbose=verbose,
+            )

@@ -8,6 +8,47 @@ BELLA computes the optimal neighbourhood around the given data point and then tr
 BELLA can provide both factual and counterfactual explanations, and the explanations are accurate, general, simple, robust, deterministic, and verifiable.
 
 ## How to run BELLA
+Using the BellaExplainer class
+
+```
+import pandas as pd
+from bella import BellaExplainer
+
+# Load your dataset (must include the target column)
+train = pd.read_csv("your_train.csv")
+
+# Initialize the explainer
+explainer = BellaExplainer(
+    train=train,
+    target_column="target",
+    binary_features=["b1", "b2"],
+    categorical_features=["cat1", "cat2"],
+    numerical_features=["n1", "n2", "n3"],
+    standardize=True,
+)
+
+# Define the point to explain
+point = {
+    "b1": 1,
+    "b2": 0,
+    "cat1": "A",
+    "cat2": "X",
+    "n1": 0.5,
+    "n2": 1.2,
+    "n3": -0.7,
+    "target": 1,  # optional
+}
+
+# Get standard explanation
+exp_box, exp_model, exp = explainer.explain(point)
+
+# Or generate counterfactuals with a reference value
+c_exp_model, new_data_point, counterfactual = explainer.explain(
+    point, reference_value=0.0
+)
+
+```
+
 To run the experiments, open the terminal and run:
 
 ```python3 run.py```
