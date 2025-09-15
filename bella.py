@@ -495,7 +495,6 @@ def explain(train, explain_point, bin_fs, cat_dist, num_fs, train_dummy=None, ex
 
 class BellaExplainer:
     """
-
     Parameters
     ----------
     train : pd.DataFrame
@@ -528,7 +527,6 @@ class BellaExplainer:
         if self.target_column not in train.columns:
             raise ValueError(f"Target column '{self.target_column}' not found in train.")
 
-        # Ensure declared features (if any) exist in train
         declared = self.binary_features + self.categorical_features + self.numerical_features
         missing_declared = [c for c in declared if c not in train.columns]
         if missing_declared:
@@ -536,10 +534,8 @@ class BellaExplainer:
                 f"Declared features not found in train columns: {missing_declared}"
             )
 
-        # Copy and prepare train
         self.train = train.copy(deep=True)
 
-        # Fit scaler if we have numeric features and standardization enabled
         self.standardizer: Optional[StandardScaler] = None
         if self.numerical_features and self.standardize:
             self.standardizer = StandardScaler()
@@ -547,17 +543,14 @@ class BellaExplainer:
                 self.train[self.numerical_features].values
             )
 
-        # Compute categorical distances if we have categorical features
         self.categorical_dis = None
         if self.categorical_features:
             self.categorical_dis = compute_categorical_distances(
                 self.train, self.categorical_features, self.numerical_features
             )
 
-        # X = train without target
         self.X = self.train.drop(columns=[self.target_column])
 
-        # One-hot training frame (reference) only if we have categorical features
         self.train_dummy = None
         if self.categorical_features:
             self.train_dummy = pd.get_dummies(self.X, columns=self.categorical_features)
@@ -601,17 +594,6 @@ class BellaExplainer:
                 f"got {type(explain_point)}."
             )
 
-        # Enforce presence according to policy
-        required = self._required_features()
-        if required:
-            missing_all = [c for c in required if c not in df.columns]
-            if missing_all:
-                raise ValueError(
-                    f"Missing feature(s) in explain_point: {missing_all}. "
-                    f"All declared features must be provided."
-                )
-
-        # Apply scaling if applicable
         if self.numerical_features and self.standardizer is not None:
             df.loc[:, self.numerical_features] = self.standardizer.transform(
                 df[self.numerical_features].values
@@ -620,23 +602,19 @@ class BellaExplainer:
         return df
 
     def _align_dummies(self, test_no_target: pd.DataFrame) -> Optional[pd.DataFrame]:
-        """One-hot encode a single-row test frame to match train dummies (or None if no categoricals)."""
         if not self.categorical_features:
             return None
 
         test_dummy = pd.get_dummies(test_no_target, columns=self.categorical_features)
 
-        # Add missing columns from train_dummy
         for c in self.train_dummy.columns:
             if c not in test_dummy.columns:
                 test_dummy[c] = 0
 
-        # Drop extra columns unseen in train
         extra = [c for c in test_dummy.columns if c not in self.train_dummy.columns]
         if extra:
             test_dummy = test_dummy.drop(columns=extra)
 
-        # Reorder to train reference
         test_dummy = test_dummy[self.train_dummy.columns]
         return test_dummy
 
@@ -651,25 +629,22 @@ class BellaExplainer:
 
         Returns
         -------
-        - If reference_value is not None:
+        - If reference_value is not None - compute counterfactual explanation:
             (c_exp_model, new_data_point, counterfactual)
-        - Else:
+        - Else - standard explanation:
             (exp_box, exp_model, exp)
         """
         test = self._prep_point_df(explain_point)
 
-        # Build test without target (keep columns that exist; target may be absent)
         test_no_target = (
             test.drop(columns=[self.target_column])
             if self.target_column in test.columns
             else test.copy(deep=True)
         )
 
-        # Prepare dummy versions if needed
         explain_point_dummy = self._align_dummies(test_no_target)
         train_dummy = self.train_dummy  # can be None
 
-        # Point sent to bella
         exp_point = test_no_target.copy(deep=True)
 
         if reference_value is not None:

@@ -36,7 +36,7 @@ point = {
     "n1": 0.5,
     "n2": 1.2,
     "n3": -0.7,
-    "target": 1,  # optional
+    "target": 1.2,
 }
 
 # Get standard explanation
@@ -44,7 +44,7 @@ exp_box, exp_model, exp = explainer.explain(point)
 
 # Or generate counterfactuals with a reference value
 c_exp_model, new_data_point, counterfactual = explainer.explain(
-    point, reference_value=0.0
+    point, reference_value=0.7
 )
 
 ```
